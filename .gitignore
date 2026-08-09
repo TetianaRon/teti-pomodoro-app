@@ -13,3 +13,9 @@ venv/
 token.json
 credentials.json
 .env
+
+# Calendar exports and feed URLs. An .ics export contains the full contents
+# of the work calendar, and the secret iCal address is a credential that
+# grants read access to all of it — neither belongs in a GitHub repo.
+*.ics
+local/
