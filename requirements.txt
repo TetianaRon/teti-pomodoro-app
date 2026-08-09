@@ -2,7 +2,18 @@ pynput>=1.7.6
 pywin32>=306; sys_platform == "win32"
 pystray>=0.19.5
 Pillow>=10.0.0
-google-api-python-client>=2.100.0
-google-auth-httplib2>=0.1.1
-google-auth-oauthlib>=1.1.0
 pyinstaller>=6.0.0
+
+# Windows ships no IANA timezone database, so zoneinfo cannot resolve
+# America/Toronto without this. Needed for calendar day-boundary maths
+# (docs/SPEC.md §5) and must be bundled by PyInstaller in Phase 8.
+tzdata>=2024.1
+
+# Calendar access needs no OAuth after all — the work calendar is reachable
+# as a secret iCal URL carrying free/busy data, which is a plain HTTPS fetch
+# plus an .ics parse (docs/SPEC.md §9). Keeping the Google client libraries
+# listed but commented out: they are the fallback if that link is ever
+# withdrawn and the freeBusy API becomes necessary.
+# google-api-python-client>=2.100.0
+# google-auth-httplib2>=0.1.1
+# google-auth-oauthlib>=1.1.0

@@ -51,7 +51,7 @@ A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 m
 - **Base cap: 11 hours** of tracked *work* time per working day (break time doesn't count toward this). Confirmed 2026-08-09.
 - **Non-working-day base cap: 3 hours/day.** Confirmed 2026-08-09. A day is a non-working day if **either** holds:
   1. It is a **Saturday or Sunday**.
-  2. The work calendar shows the day as **busy for its full length** — a single busy interval running midnight to midnight. Both company holidays (from the subscribed holiday calendar) and vacations (full-day events the contributor adds) present this way.
+  2. The work calendar shows **one contiguous busy block of ≥ 6 hours**, measured in the calendar's own timezone after merging overlapping intervals. Threshold and rationale come from real data — see "Measured against the real feed" below.
 
   Every other mechanic in this section and §7 applies identically on non-working days: same effective-cap formula, same Emergency Mode, same shared weekly budget.
 - **Emergency Mode budget is one shared pool** of 3h across all 7 days — not split weekday/weekend. Confirmed 2026-08-09.
@@ -62,19 +62,54 @@ and nothing else*: no titles, no event types, no `outOfOffice` flag,
 no attendee lists. Every calendar-driven rule in this spec must therefore be
 expressible in terms of busy intervals alone. In particular:
 
-- **Detecting a day off** means recognising a busy interval that covers the
-  entire day, since that is how an all-day event surfaces in free/busy. A day
-  merely *packed* with meetings appears as several shorter intervals with gaps
-  between them, so the two remain distinguishable. Worth validating against
-  real data early in Phase 3 — especially how the shared link renders a
-  multi-day vacation (one long interval, or one per day?) and which timezone
-  the day boundaries land in.
-- **Full-day busy intervals must be excluded from §4A's meeting skip.** §4A
-  suppresses breaks whenever the calendar is busy; a midnight-to-midnight
-  interval would match all day, so a vacation day would suppress break
-  enforcement entirely — the opposite of what the reduced cap intends.
-  Meeting-skip should consider only intervals materially shorter than a full
-  day; the cap rule above considers exactly the ones it ignores.
+**Measured against the real feed (2026-08-09).** A 706-event export spanning
+2026-06-10 → 2028-08-07 was analysed. Findings, which the rule above is built on:
+
+| Day type | Longest contiguous busy block |
+| --- | --- |
+| Ordinary weekday (384 sampled) | **≤ 1.5 h** |
+| Company holiday | **8.5 – 12.5 h**, one block, ~09:00–18:00 |
+| Vacation day | **24 h**, midnight-aligned |
+
+- The separation is close to sixfold, so any threshold between ~2 h and ~8 h
+  classifies every day in the sample correctly. **6 h** is the midpoint with
+  the most headroom in both directions.
+- **Holidays and vacations do not look alike.** Vacations are the
+  midnight-to-midnight blocks; company holidays are ordinary working-hours
+  blocks that merely happen to be long. An earlier draft of this rule looked
+  only for full-day coverage and would have caught vacations while silently
+  missing every holiday.
+- Zero false positives across 14 months. The only two ordinary-looking days
+  that tripped the rule — 2026-09-30 and 2026-11-11 — turned out to be
+  National Day for Truth and Reconciliation and Remembrance Day.
+- **Everything is `SUMMARY:Busy`.** No titles, no event types, no `TRANSP`
+  values, no all-day flags — all 706 events are timed and in UTC. The
+  free/busy constraint is confirmed exactly as described; there is no richer
+  signal available to fall back on.
+- The feed carries its own timezone (`X-WR-TIMEZONE: America/Toronto`), so
+  day boundaries should be computed from that rather than from the machine's
+  locale. Doing this in UTC misattributes evening events to the following day.
+
+**Known limits of the rule, accepted:**
+
+- A genuine all-day offsite or workshop would look exactly like a holiday and
+  would cut the cap to 3 h. Free/busy data cannot distinguish them. The
+  consequence is bounded — Emergency Mode remains available — but a manual
+  override is worth considering in Phase 4.
+- Holidays are only detectable once they are actually booked into the
+  calendar. In the sample, everything through 2027-01-01 is booked and
+  nothing after 2027-02-15 is, so the far future currently reads as ordinary
+  working days. This resolves itself as the year gets booked, since the app
+  only ever asks about *today*, but it does mean a holiday booked late will
+  be missed.
+- **Day-off blocks must be excluded from §4A's meeting skip.** §4A suppresses
+  breaks whenever the calendar is busy. The same ≥6 h blocks that mark a day
+  off would otherwise match for their whole length, suppressing break
+  enforcement for 9 hours on a holiday or a full 24 on a vacation day — the
+  exact opposite of what the reduced cap intends. **Meeting-skip should
+  consider only blocks below the day-off threshold; the two rules partition
+  the same data and must never both fire on one block.** Measured against the
+  real feed this is clean: genuine meetings never exceed 1.5 h.
 - **The cap must degrade safely when the calendar is unreachable** (offline,
   stale link, first run before setup). Assumption unless told otherwise: fall
   back to the day-of-week rule alone — Sat/Sun reduced, everything else 11h —
@@ -132,14 +167,23 @@ No cloud sync planned — this stays on your machine.
 Likely libraries:
 - `pynput` / `pywin32` — global keyboard/mouse activity detection
 - `tkinter` or `PyQt` — the full-screen lock overlay window
-- Google Calendar reads — **approach revised 2026-08-09.** Since only free/busy
-  data is available (see §5), the likely implementation is a plain HTTPS fetch
-  of the calendar's shared iCal URL plus an `.ics` parser (`icalendar`), which
-  needs **no OAuth, no consent screen, and no `google-api-python-client`** —
-  just the URL pasted in once at setup. That would remove the single most
-  fiddly piece of the original plan. To be confirmed at the start of Phase 3
-  against the actual sharing link; `google-api-python-client` with the
-  `freeBusy` endpoint remains the fallback if the link turns out not to work.
+- Google Calendar reads — **approach revised and confirmed 2026-08-09.** Only
+  free/busy data is available (see §5), and a real export parsed cleanly, so
+  the implementation is a plain HTTPS fetch of the calendar's secret iCal URL
+  plus an `.ics` parse. This needs **no OAuth, no consent screen, and no
+  `google-api-python-client`** — just the URL pasted in once at setup,
+  removing the fiddliest piece of the original plan. The feed is simple
+  enough (`BEGIN:VEVENT` / `DTSTART` / `DTEND`, everything `SUMMARY:Busy`)
+  that a small dependency-free parser is viable; `icalendar` is the fallback
+  if recurrence rules turn out to need real handling.
+  - ⚠️ **The secret iCal URL is a credential** — it grants read access to the
+    entire work calendar and cannot be scoped down. It belongs in a
+    gitignored local config, never in the repo. `.gitignore` already covers
+    `.env`, `credentials.json`, `token.json`, `*.ics` and `local/`.
+- `tzdata` — **required on Windows.** Windows ships no IANA timezone
+  database, so `zoneinfo` raises `ZoneInfoNotFoundError` for
+  `America/Toronto` without it. Needed for §5's day-boundary maths, and
+  PyInstaller must bundle it for the packaged `.exe` in Phase 8.
 - `pystray` — system tray icon (status, manual controls: custom skip, Focus Mode, Emergency Mode, manual walking toggle)
 - `sqlite3` (stdlib) — local history log
 - `PyInstaller` — packaging to `.exe`
