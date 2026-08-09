@@ -48,8 +48,38 @@ A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 m
 
 ## 5. Daily work cap + Emergency Mode
 
-- **Base cap:** 10–11 hours of tracked *work* time per weekday (break time doesn't count toward this).
-- **Weekend base cap: 3 hours/day** (Saturday and Sunday — flag if you meant a different set of days). Every other mechanic in this section and §7 applies identically on weekends: same effective-cap formula, same Emergency Mode, same 3h/week Emergency Mode budget shared across the whole week (not a separate weekday/weekend allowance) unless you'd rather split it.
+- **Base cap: 11 hours** of tracked *work* time per working day (break time doesn't count toward this). Confirmed 2026-08-09.
+- **Non-working-day base cap: 3 hours/day.** Confirmed 2026-08-09. A day is a non-working day if **either** holds:
+  1. It is a **Saturday or Sunday**.
+  2. The work calendar shows the day as **busy for its full length** — a single busy interval running midnight to midnight. Both company holidays (from the subscribed holiday calendar) and vacations (full-day events the contributor adds) present this way.
+
+  Every other mechanic in this section and §7 applies identically on non-working days: same effective-cap formula, same Emergency Mode, same shared weekly budget.
+- **Emergency Mode budget is one shared pool** of 3h across all 7 days — not split weekday/weekend. Confirmed 2026-08-09.
+
+**Calendar access is free/busy only — this constrains the whole design.**
+The work Google account exposes a shareable link that reports *busy intervals
+and nothing else*: no titles, no event types, no `outOfOffice` flag,
+no attendee lists. Every calendar-driven rule in this spec must therefore be
+expressible in terms of busy intervals alone. In particular:
+
+- **Detecting a day off** means recognising a busy interval that covers the
+  entire day, since that is how an all-day event surfaces in free/busy. A day
+  merely *packed* with meetings appears as several shorter intervals with gaps
+  between them, so the two remain distinguishable. Worth validating against
+  real data early in Phase 3 — especially how the shared link renders a
+  multi-day vacation (one long interval, or one per day?) and which timezone
+  the day boundaries land in.
+- **Full-day busy intervals must be excluded from §4A's meeting skip.** §4A
+  suppresses breaks whenever the calendar is busy; a midnight-to-midnight
+  interval would match all day, so a vacation day would suppress break
+  enforcement entirely — the opposite of what the reduced cap intends.
+  Meeting-skip should consider only intervals materially shorter than a full
+  day; the cap rule above considers exactly the ones it ignores.
+- **The cap must degrade safely when the calendar is unreachable** (offline,
+  stale link, first run before setup). Assumption unless told otherwise: fall
+  back to the day-of-week rule alone — Sat/Sun reduced, everything else 11h —
+  and surface that it is running without calendar data, rather than failing
+  closed or silently granting a full cap on a holiday.
 - **Effective cap:** the base cap, adjusted live by the walking shortfall described in §7 — see the formula there. This is the actual number of work-minutes the app will allow to start on a given day.
 - Once the effective cap is hit, the app stops starting new work sessions from activity — you're done for the day as far as the app is concerned (unless Emergency Mode is used).
 - **Emergency Mode:** the only way past the effective cap. Each activation grants **+1 hour**, stacking on top of whatever the effective cap is at that moment — forced breaks continue as normal during that extra hour; Emergency Mode is not a break-skip mechanism. Capped at **3 hours total per week** (so at most three activations, or any split adding up to 3h, per rolling week). No calendar or advance-scheduling requirement — a direct override, kept rare by the weekly cap rather than gated by a delay. If a genuinely extreme situation exceeds this budget, the intentional escape hatch is closing the app entirely — a deliberate act, not a casual one.
@@ -102,18 +132,26 @@ No cloud sync planned — this stays on your machine.
 Likely libraries:
 - `pynput` / `pywin32` — global keyboard/mouse activity detection
 - `tkinter` or `PyQt` — the full-screen lock overlay window
-- `google-api-python-client` + OAuth — Google Calendar reads
+- Google Calendar reads — **approach revised 2026-08-09.** Since only free/busy
+  data is available (see §5), the likely implementation is a plain HTTPS fetch
+  of the calendar's shared iCal URL plus an `.ics` parser (`icalendar`), which
+  needs **no OAuth, no consent screen, and no `google-api-python-client`** —
+  just the URL pasted in once at setup. That would remove the single most
+  fiddly piece of the original plan. To be confirmed at the start of Phase 3
+  against the actual sharing link; `google-api-python-client` with the
+  `freeBusy` endpoint remains the fallback if the link turns out not to work.
 - `pystray` — system tray icon (status, manual controls: custom skip, Focus Mode, Emergency Mode, manual walking toggle)
 - `sqlite3` (stdlib) — local history log
 - `PyInstaller` — packaging to `.exe`
 
 ## 10. Open items / assumptions to confirm before or during build
 
-- Exact weekday cap value: 10h vs 11h — will be a config value rather than hardcoded; default to 10.5h unless you'd rather pick one now. Weekend cap is fixed at 3h/day.
-- Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool across all 7 days rather than split by weekday/weekend.
+- ~~Exact weekday cap value: 10h vs 11h.~~ **Resolved 2026-08-09: 11h.** Still a config value, not hardcoded.
+- ~~Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool.~~ **Both confirmed 2026-08-09**, and non-working days extended to cover holidays and vacations via the work calendar — see §5.
+- **New (2026-08-09):** how a full-day busy block actually renders in the shared free/busy feed — one interval per vacation day or one spanning the whole stretch, and which timezone the day boundaries fall in. Needs checking against real data at the start of Phase 3; §5's day-off rule depends on it.
 - ~~Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.~~ **Resolved 2026-08-09 — resets after an idle gap** (`Config.idle_reset_after`, default 60 min). Chosen over a fixed daily reset because it matches the auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset carries a count across a long lunch and resets one mid-evening. Implemented in Phase 1.
 - App name/branding (currently just a placeholder).
-- First-run setup flow: Google Calendar OAuth consent.
+- First-run setup flow. Likely much smaller than first assumed: if the free/busy iCal URL works (see §9), setup is pasting one URL rather than an OAuth consent flow.
 
 ## 11. Suggested build order
 

@@ -23,7 +23,8 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - **Calendar provider:** Google Calendar.
 - **Walking/standing-desk detection:** manual toggle only. Tapo-camera-based automatic detection (both desk-height classification and pose-estimation leg-motion detection) considered and explicitly ruled out — available camera views don't show the legs/under-desk area, a hardware constraint, not just an effort trade-off. See docs/SPEC.md §7.
 - **Work-cap ↔ walking interaction:** the daily work cap is not fixed — it's a live "effective cap" = base cap − max(0, 60 − minutes walked today), recalculated continuously. Emergency Mode stacks an additional +1h on top of whatever the effective cap is at the time of activation (confirmed with contributor).
-- **Weekday vs weekend base cap:** base cap is 10–11h on weekdays, **3h/day on weekends** (assumed Sat+Sun — flagged for confirmation). All other mechanics (effective-cap formula, Emergency Mode, its 3h/week shared budget) apply identically on both.
+- **Working vs non-working base cap (confirmed 2026-08-09):** **11h** on working days, **3h/day** on non-working days. A day is non-working if it's a Saturday or Sunday, *or* the work calendar shows it busy for its full length — which is how both company holidays and self-added vacation days appear. Emergency Mode's 3h/week is **one shared pool** across all 7 days. All other mechanics (effective-cap formula, Emergency Mode) apply identically on both.
+- **Calendar access is free/busy only (2026-08-09).** The work Google account exposes a shared link reporting busy intervals and nothing else — no titles, no event types, no `outOfOffice` flag. Every calendar-driven rule must be expressible in busy intervals alone. Two consequences worth carrying into Phase 3: a day off is recognised as a busy interval covering the *whole* day (a merely meeting-packed day is several shorter intervals with gaps), and those full-day intervals must be **excluded** from the §4A meeting skip — otherwise a vacation day would suppress break enforcement all day, the exact opposite of the reduced cap's intent. Likely upside: a free/busy iCal URL needs no OAuth, no consent screen and no `google-api-python-client`, which would remove the fiddliest part of the original plan — to be confirmed against the real link at the start of Phase 3.
 - **Timer as a pure state machine:** `pomodoro_guardian/timer.py` takes its clock as an argument and returns events instead of firing callbacks — no threads, no sleeping, no UI. Everything with a real duration (a 25-minute interval, a 4th-cycle long break, an hour-long idle gap) is therefore testable in milliseconds without a display or input hooks, which matters because every other part of Phase 1 needs a live Windows session to exercise.
 - **Work is credited against input timestamps, not tick deltas:** the engine advances a watermark up to the last real keystroke. The 30s `input_gap` grace still bridges a pause in typing — it's paid retroactively when you resume — but silence is never credited on its own, and the first keystroke after the machine wakes can't buy back the hours it spent asleep. Two Phase 1 tests failed on exactly these before the fix.
 - **Lock safety hatch:** `Config.safety_unlock` (on by default) releases the lock if you hold Escape for 3s. Enforcement is deliberately weakened while the lock is young — a bug in a 25-minute unattended lock strands you on your own machine. Turn it off via `--no-safety-unlock` once it's proven itself. Ctrl+Alt+Del is never blocked: that needs a kernel driver, which is the wrong trade for enforcing coffee breaks.
@@ -32,14 +33,16 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Open items
 
-- Exact daily work cap: 10h vs 11h (default 10.5h pending a decision). Needed by Phase 4.
 - App name/branding.
-- First-run setup flow details (Google OAuth consent screen, etc.).
-- Confirm "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one pool across all 7 days. Both assumed in docs/SPEC.md §5; needed by Phase 4.
+- How a full-day busy block renders in the shared free/busy feed — one interval per vacation day or one spanning the stretch, and which timezone the day boundaries land in. Check against real data at the start of Phase 3; the non-working-day rule depends on it.
+- First-run setup flow. Probably just pasting the free/busy iCal URL — see the calendar-access decision below.
 - Whether to keep `Config.safety_unlock` (hold Escape to release the lock) on. Currently on — see Architectural decisions.
 
 ### Resolved
 
+- ~~Exact daily work cap~~ — **resolved 2026-08-09: 11h** on working days, 3h on non-working days. Config values, not hardcoded.
+- ~~"Weekend" = Saturday + Sunday?~~ — **confirmed 2026-08-09**, and extended: non-working days now also cover company holidays and vacations, read from the work calendar. See the calendar-access decision below.
+- ~~Emergency Mode's 3h/week budget split?~~ — **resolved 2026-08-09: one shared pool** across all 7 days.
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
@@ -71,6 +74,8 @@ Pushed the backlog first: `git push -u origin main` succeeded immediately, so th
 - Lock keeps a hold-Escape safety release while the code is young; Ctrl+Alt+Del stays available permanently by design.
 
 **Workflow issues logged to `ISSUES.md`:** `laivly-global-session` is declared a hard gate in `CLAUDE.md` but isn't installed in native Claude Code — the gate is unsatisfiable exactly where the app code gets written; proceeded with contributor approval from the practices already documented in-repo. Also confirmed the device-bridge git-lock caveat is **bridge-only** (a dozen native git commands left no locks), but a stale `.git/HEAD.lock` from the previous bridge session survived into this one and would have failed the first commit — read-only commands and even `push` ignored it, so it stayed invisible until then.
+
+**Late-session decisions (contributor, after Phase 1 was committed):** weekday cap **11h**; weekend = **Sat + Sun**, extended to cover **holidays and vacations** from the work calendar; Emergency Mode budget is **one shared pool**. Then a significant correction: the work calendar is reachable only as **free/busy**, so no event titles or types are available — holidays and vacations have to be inferred from full-day busy blocks. Recorded in docs/SPEC.md §5/§9/§10 and in Architectural decisions above. This turned out to *simplify* Phase 3 rather than complicate it (no OAuth), but it also surfaced a design conflict — full-day busy blocks would otherwise trigger §4A's meeting skip and suppress breaks for an entire vacation day.
 
 **Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Worth doing before Phase 2 starts: run the app for a real 25-minute cycle to confirm the lock behaves unattended, and decide whether `safety_unlock` stays on.
 
