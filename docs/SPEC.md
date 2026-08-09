@@ -64,14 +64,24 @@ it always works — Phase 1's lock is young code, and a bug in an unattended
 requirement: past 60 minutes a day it must *stop* working, or the cap is
 decorative. The same gesture cannot be both.
 
-Resolving it means deciding what holding Escape does once the daily budget is
-spent. See §10.
+**Resolved 2026-08-09: once the budget is spent, holding Escape does nothing
+and the break holds.** The menu still opens, with all three durations shown
+greyed out — so the budget being gone is *visible* rather than the gesture
+failing silently, which would read as a bug. This matches §5's stated
+philosophy that the real escape hatch is closing the app entirely: a
+deliberate act, not a casual one.
 
-Whatever is decided, the safety property should be preserved structurally
-rather than by discretion: the lock should carry a **hard maximum duration**
-enforced independently of the UI, so a hung or buggy lock always releases
-itself even when no skip is available. That protects against the failure the
-safety hatch was guarding without handing back a discretionary escape.
+**The safety property is preserved structurally instead.** The lock carries a
+**hard maximum duration** enforced by a plain daemon thread that owns no
+reference to the UI — if suppression ever outlives its break by more than
+`Config.lock_max_overrun` (60s), it releases itself. Implemented in Phase 1
+rather than deferred, since the shipped lock had no independent failsafe at
+all: a hung tkinter loop would have left input suppressed with no way out.
+
+The distinction that makes this work: the watchdog guards against **the app
+failing**, not against the user. It cannot be invoked, has no UI, and grants
+no discretionary escape — so closing the Escape route in Phase 3 costs
+nothing in safety.
 
 ## 5. Daily work cap + Emergency Mode
 
@@ -262,7 +272,7 @@ Likely libraries:
 - ~~Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool.~~ **Both confirmed 2026-08-09**, and non-working days extended to cover holidays and vacations via the work calendar — see §5.
 - **New (2026-08-09):** how a full-day busy block actually renders in the shared free/busy feed — one interval per vacation day or one spanning the whole stretch, and which timezone the day boundaries fall in. Needs checking against real data at the start of Phase 3; §5's day-off rule depends on it.
 - ~~Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.~~ **Resolved 2026-08-09 — resets after an idle gap** (`Config.idle_reset_after`, default 60 min). Chosen over a fixed daily reset because it matches the auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset carries a count across a long lunch and resets one mid-evening. Implemented in Phase 1.
-- **New (2026-08-09):** what holding Escape does once the day's 60-minute custom-skip budget is spent — see §4B. The gesture currently guarantees an escape; the skip system requires that it stop. Phase 3 must pick one.
+- ~~What holding Escape does once the day's 60-minute custom-skip budget is spent.~~ **Resolved 2026-08-09: nothing — the break holds**, with the durations shown greyed out so the exhausted budget is visible. The safety property moves to a UI-independent watchdog instead. See §4B.
 - ~~App name/branding.~~ **Resolved 2026-08-09: Pomodoro Guardian**, kept after briefly considering the shorter "Pomo". The `pomo` abbreviation stays as the project/file prefix (`pomo-task-build-phase.md`); it is a shorthand, not the app's name.
 - ~~First-run setup flow.~~ **Built 2026-08-09**, and it was indeed much smaller than first assumed — pasting one URL, not an OAuth consent flow. A ttk window (`setup_dialog.py`) shown on first run or via `--setup`, covering the calendar URL (with a Test button that fetches and describes the feed), the rhythm, the safety unlock, the daily caps and the walking target. Settings persist to `%APPDATA%\PomodoroGuardian\config.json` — outside the repo, so the secret URL cannot be committed. Detection thresholds stay hand-editable in the JSON rather than being exposed as choices.
 

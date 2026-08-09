@@ -33,18 +33,40 @@ class InputSuppressor:
     """
 
     def __init__(self, on_safety_hold: "callable | None" = None,
-                 hold_seconds: float = 3.0) -> None:
+                 hold_seconds: float = 3.0,
+                 max_seconds: float | None = None) -> None:
         self._on_safety_hold = on_safety_hold
         self._hold_seconds = hold_seconds
+        self._max_seconds = max_seconds
         self._listeners: list = []
         self._escape_down_at: float | None = None
         self._lock = threading.Lock()
         self._fired = False
+        self._stopped = threading.Event()
         atexit.register(self.stop)
+
+    def arm_watchdog(self) -> None:
+        """Release suppression unconditionally after `max_seconds`.
+
+        A plain daemon thread, deliberately owning no reference to the UI:
+        its whole job is to survive a frozen tkinter loop. Suppressed input
+        with a wedged UI is the one failure here that a user cannot talk
+        their way out of.
+        """
+        if not self._max_seconds:
+            return
+
+        def guard() -> None:
+            if not self._stopped.wait(self._max_seconds):
+                self.stop()
+
+        threading.Thread(target=guard, daemon=True).start()
 
     def start(self) -> None:
         if self._listeners:
             return
+        self._stopped.clear()
+        self.arm_watchdog()
         try:
             from pynput import keyboard, mouse
         except ImportError:
@@ -72,6 +94,7 @@ class InputSuppressor:
             listener.start()
 
     def stop(self) -> None:
+        self._stopped.set()   # stands the watchdog down
         for listener in self._listeners:
             try:
                 listener.stop()
@@ -182,6 +205,9 @@ class LockOverlay:
             if self._config.safety_unlock
             else None,
             hold_seconds=self._config.safety_unlock_hold,
+            # Independent of the UI loop, so a hung tick can't leave input
+            # suppressed with no way out.
+            max_seconds=duration + self._config.lock_max_overrun,
         )
         self._suppressor.start()
 

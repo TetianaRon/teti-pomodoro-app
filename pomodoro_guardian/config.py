@@ -67,6 +67,14 @@ class Config:
     safety_unlock: bool = True
     safety_unlock_hold: float = 3.0
 
+    # Hard ceiling on input suppression, enforced by a plain thread rather
+    # than the UI loop. If the lock ever outlives its break by this much —
+    # a hung tkinter loop, a crashed tick, a bug — suppression releases
+    # itself. This is the safety property that survives closing the
+    # Escape route in Phase 3 (docs/SPEC.md §4B): it guards against the
+    # app failing, not against the user.
+    lock_max_overrun: float = 60.0
+
     def scaled(self, factor: float) -> "Config":
         """Return a copy with every duration divided by `factor`.
 
