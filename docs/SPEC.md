@@ -36,6 +36,45 @@ The lock will not trigger — and an in-progress countdown pauses — while:
 
 These are automatic; you don't have to invoke anything for them.
 
+**How it is detected (built 2026-08-09, Phase 2).** Deliberately *not* by
+process name. Maintaining a list of conferencing executables breaks whenever a
+tool is added or renamed, and a running app says nothing about whether a call
+is actually happening. Two signals Windows already maintains are used instead:
+
+- **CapabilityAccessManager's ConsentStore** — the registry keys behind the
+  camera/microphone privacy indicator in the tray. An app currently holding a
+  device has `LastUsedTimeStop = 0`; that zero is the whole signal. It is
+  authoritative, cheap to read, and works for tools that don't exist yet.
+- **`SHQueryUserNotificationState`** — the API Windows itself uses to decide
+  whether it would be rude to show a notification. Only `QUNS_PRESENTATION_MODE`
+  and `QUNS_BUSY` count. Games (`RUNNING_D3D_FULL_SCREEN`) and ordinary
+  full-screen apps deliberately do not: a maximised video player must not be
+  able to hold breaks off all evening, and it isn't work anyway.
+
+Verified against the real machine's registry, which had usage history for
+Slack, Chrome, Zoom, Loom, the Camera app and Premiere — covering both
+packaged and desktop key formats. **`chrome.exe` is the case that justifies
+the approach**: browser-based Meet and Teams calls are invisible to process
+matching, since Chrome is always running, but "Chrome is holding the
+microphone" identifies them exactly.
+
+**Freezing behaviour.** While excluded, the work countdown freezes rather than
+running on, no session starts from activity, and time on the call is never
+retroactively credited as work once typing resumes. A break *already* locked
+runs its full course — you cannot join a call through a lock, and cutting a
+break short would be worse than letting it finish. When an exclusion lifts,
+idle time is measured from that moment rather than from the last keystroke:
+without that, a two-hour meeting you barely typed in would look like an
+absence and discard the session the instant it ended.
+
+**Known limitation, accepted.** Any app holding the microphone open — a
+conferencing tool that never releases it, a recording app left running —
+silently switches break enforcement off. The app warns in its log after
+`Config.exclusion_warn_after` (2h) of continuous exclusion but does not
+override it, because overriding would mean locking the screen during what
+might be a genuine call. `--exclusions` reports what is currently holding
+breaks off, and `--no-exclusions` disables the mechanism entirely.
+
 ## 4. Break-skip system
 
 Two distinct skip paths, both self-serve, no "prove it" friction:

@@ -15,6 +15,7 @@ from pathlib import Path
 from . import settings as settings_module
 from .activity import ActivityMonitor, create_monitor
 from .config import DEFAULT, Config
+from .exclusions import Detector, Exclusion, NullDetector, create_detector
 from .overlay import LockOverlay, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -27,11 +28,24 @@ class Application:
         config: Config = DEFAULT,
         monitor: ActivityMonitor | None = None,
         dry_run: bool = False,
+        detector: Detector | None = None,
     ) -> None:
         self.config = config
         self.dry_run = dry_run
         self.monitor = monitor if monitor is not None else create_monitor()
+        self.detector = (
+            detector
+            if detector is not None
+            else create_detector(
+                camera=config.exclude_on_camera,
+                microphone=config.exclude_on_microphone,
+                presenting=config.exclude_on_presenting,
+            )
+        )
         self.engine = PomodoroEngine(config, now=time.monotonic())
+        self._excluded_since: float | None = None
+        self._warned_long_exclusion = False
+        self._exclusion = Exclusion()
 
         self._root = tk.Tk()
         self._root.withdraw()  # the controller window is never shown
@@ -66,8 +80,13 @@ class Application:
 
     def _tick(self) -> None:
         now = time.monotonic()
-        events = self.engine.update(now, self.monitor.last_input_at)
+        exclusion = self.detector.check()
+        self._exclusion = exclusion
+        events = self.engine.update(
+            now, self.monitor.last_input_at, excluded=exclusion.active
+        )
         snapshot = self.engine.snapshot()
+        self._watch_long_exclusion(now, exclusion.active)
 
         for event in events:
             self._handle(event, snapshot)
@@ -101,6 +120,13 @@ class Application:
             self._log("session dropped after a long idle gap")
         elif event is Event.CYCLES_RESET:
             self._log("long-break cycle count reset")
+        elif event is Event.EXCLUSION_STARTED:
+            self._log(f"holding off — {self._exclusion.describe()}")
+            # A call arriving during the warning means the lock isn't
+            # imminent any more; leaving the banner up would be a lie.
+            self.banner.hide()
+        elif event is Event.EXCLUSION_ENDED:
+            self._log("clear again — countdown resumes")
         elif event is Event.WARNING_STARTED:
             self._log(
                 f"break in {self.config.warning_lead / 60:.0f} min"
@@ -120,6 +146,31 @@ class Application:
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"
             )
             self.overlay.release()
+
+    def _watch_long_exclusion(self, now: float, excluded: bool) -> None:
+        """Say something if breaks have been held off for an implausibly long time.
+
+        A stuck microphone — a conferencing app that never releases it, a
+        recording tool left running — would otherwise silently switch break
+        enforcement off for the rest of the day. This only warns: the
+        exclusion still stands, because overriding it would mean locking
+        the screen during what might be a genuine call.
+        """
+        if not excluded:
+            self._excluded_since = None
+            self._warned_long_exclusion = False
+            return
+        if self._excluded_since is None:
+            self._excluded_since = now
+            return
+        held = now - self._excluded_since
+        if held >= self.config.exclusion_warn_after and not self._warned_long_exclusion:
+            self._warned_long_exclusion = True
+            self._log(
+                f"note: breaks held off for {held / 3600:.1f}h by "
+                f"{self._exclusion.describe()} — if that looks wrong, some app "
+                f"is holding the device open"
+            )
 
     def _log(self, message: str) -> None:
         print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
@@ -155,6 +206,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="open the settings window, then exit",
     )
     parser.add_argument(
+        "--no-exclusions",
+        action="store_true",
+        help="ignore calls and screen sharing; always enforce breaks",
+    )
+    parser.add_argument(
+        "--exclusions",
+        action="store_true",
+        help="report what is currently holding breaks off, then exit",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         metavar="PATH",
@@ -162,6 +223,33 @@ def build_parser() -> argparse.ArgumentParser:
              "PomodoroGuardian\\config.json)",
     )
     return parser
+
+
+def report_exclusions(config: Config) -> int:
+    """`--exclusions`: say what is holding breaks off right now, and why."""
+    from .exclusions import devices_in_use, presenting_now
+
+    detector = create_detector(
+        camera=config.exclude_on_camera,
+        microphone=config.exclude_on_microphone,
+        presenting=config.exclude_on_presenting,
+    )
+    exclusion = detector.check()
+
+    print("Never-interrupt exclusions (SPEC §3)\n")
+    print(f"  camera in use by  : {_or_none(devices_in_use('webcam'))}")
+    print(f"  microphone in use : {_or_none(devices_in_use('microphone'))}")
+    print(f"  presenting        : {presenting_now()}")
+    print()
+    if exclusion.active:
+        print(f"  -> BREAKS HELD OFF: {exclusion.describe()}")
+    else:
+        print("  -> nothing blocking a break")
+    return 0
+
+
+def _or_none(names: list[str]) -> str:
+    return ", ".join(names) if names else "nobody"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     config = settings.config
+    if args.exclusions:
+        return report_exclusions(config)
     if args.demo:
         config = config.scaled(args.demo)
     if args.no_safety_unlock:
@@ -192,7 +282,11 @@ def main(argv: list[str] | None = None) -> int:
 
         config = replace(config, safety_unlock=False)
 
-    app = Application(config=config, dry_run=args.dry_run)
+    app = Application(
+        config=config,
+        dry_run=args.dry_run,
+        detector=NullDetector() if args.no_exclusions else None,
+    )
     try:
         app.run()
     except KeyboardInterrupt:

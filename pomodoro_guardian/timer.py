@@ -40,6 +40,8 @@ class Event(Enum):
     BREAK_STARTED = "break_started"
     BREAK_ENDED = "break_ended"
     CYCLES_RESET = "cycles_reset"    # long-break counter cleared by an idle gap
+    EXCLUSION_STARTED = "exclusion_started"  # call/screen share holds the break
+    EXCLUSION_ENDED = "exclusion_ended"
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class Snapshot:
     completed_cycles: int
     is_long_break: bool       # meaningful only while state is BREAK
     paused: bool              # work session stalled because you stepped away
+    excluded: bool            # frozen by a call or screen share (SPEC §3)
 
     @property
     def locked(self) -> bool:
@@ -81,11 +84,22 @@ class PomodoroEngine:
         self._break_is_long = False
         self._paused = False
         self._cycles_reset_pending = False  # dedupes CYCLES_RESET per idle gap
+        self._excluded = False
+        # When an exclusion lifts, idle is measured from that moment rather
+        # than from the last keystroke: you were at the desk for the call,
+        # you just weren't typing.
+        self._resume_at: float | None = None
 
     # -- public API ---------------------------------------------------
 
-    def update(self, now: float, last_input_at: float) -> list[Event]:
-        """Advance the machine to `now`. Returns events that just occurred."""
+    def update(
+        self, now: float, last_input_at: float, excluded: bool = False
+    ) -> list[Event]:
+        """Advance the machine to `now`. Returns events that just occurred.
+
+        `excluded` is SPEC §3: a call or screen share is in progress, so no
+        break may start and any countdown freezes.
+        """
         delta = now - self._last_update
         self._last_update = now
 
@@ -99,10 +113,25 @@ class PomodoroEngine:
             # would retroactively buy the entire time the machine was asleep.
             self._credited_through = now
 
+        events: list[Event] = []
+
+        # A break already under way runs its course — the lock is up, so no
+        # call could have started against it. Everything else freezes.
+        if self.state is not State.BREAK:
+            frozen = self._apply_exclusion(now, excluded, events)
+            if frozen:
+                return events
+
+        # Time spent on a call still counts as being at the desk, so idle is
+        # measured from whichever is later: the last keystroke, or the moment
+        # the call ended. Without this a two-hour meeting would look like an
+        # absence and abandon the session the instant it finished.
+        if self._resume_at is not None:
+            last_input_at = max(last_input_at, self._resume_at)
+
         idle_for = now - last_input_at
         is_active = idle_for <= self.config.input_gap
 
-        events: list[Event] = []
         # A long enough absence wipes the long-break count in every state
         # except BREAK, where the lock is the reason there's no input.
         if self.state is not State.BREAK:
@@ -124,7 +153,30 @@ class PomodoroEngine:
             completed_cycles=self.completed_cycles,
             is_long_break=self._break_is_long,
             paused=self._paused,
+            excluded=self._excluded,
         )
+
+    def _apply_exclusion(
+        self, now: float, excluded: bool, events: list[Event]
+    ) -> bool:
+        """Handle SPEC §3 freezing. Returns True if the tick should stop here."""
+        if excluded:
+            if not self._excluded:
+                self._excluded = True
+                events.append(Event.EXCLUSION_STARTED)
+            # Pin the watermark so the call's duration is never retroactively
+            # credited as work once typing resumes.
+            self._credited_through = now
+            # Don't let a call build toward the start threshold either: a
+            # session should begin from real work, not from being on a call.
+            self._active_since = None
+            return True
+
+        if self._excluded:
+            self._excluded = False
+            self._resume_at = now
+            events.append(Event.EXCLUSION_ENDED)
+        return False
 
     # -- per-state handling -------------------------------------------
 

@@ -37,6 +37,18 @@ class Config:
     banner_alpha_hover: float = 0.15
     banner_hover_poll: float = 0.12
 
+    # --- Never-interrupt exclusions (SPEC §3) ---
+    # Which signals hold a break off. Camera and microphone are read from
+    # the registry keys behind Windows' own privacy indicator; presenting
+    # comes from SHQueryUserNotificationState.
+    exclude_on_camera: bool = True
+    exclude_on_microphone: bool = True
+    exclude_on_presenting: bool = True
+    # A break held off this long without a break is worth saying out loud —
+    # usually an app holding the mic open rather than a real six-hour call.
+    # Only warns; it does not override the exclusion.
+    exclusion_warn_after: float = 2 * 60 * MINUTE
+
     # --- Detection (SPEC §2.1) ---
     # Input is "active" if the last keystroke/click was this recent. Bridges
     # the ordinary gaps in real typing so reading a paragraph mid-sentence

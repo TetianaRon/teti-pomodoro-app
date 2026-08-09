@@ -7,7 +7,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 ## Phases
 
 1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
-2. ⏳ Exclusions: video call / screen share detection
+2. 🔄 Exclusions: video call / screen share detection — built and unit-tested 2026-08-09; awaiting a live positive check (a real call in progress)
 3. ⏳ Break-skip system (calendar meeting skip + capped custom skip)
 4. ⏳ Daily work cap + Emergency Mode
 5. ⏳ Focus Mode
@@ -34,6 +34,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - **Timer as a pure state machine:** `pomodoro_guardian/timer.py` takes its clock as an argument and returns events instead of firing callbacks — no threads, no sleeping, no UI. Everything with a real duration (a 25-minute interval, a 4th-cycle long break, an hour-long idle gap) is therefore testable in milliseconds without a display or input hooks, which matters because every other part of Phase 1 needs a live Windows session to exercise.
 - **Work is credited against input timestamps, not tick deltas:** the engine advances a watermark up to the last real keystroke. The 30s `input_gap` grace still bridges a pause in typing — it's paid retroactively when you resume — but silence is never credited on its own, and the first keystroke after the machine wakes can't buy back the hours it spent asleep. Two Phase 1 tests failed on exactly these before the fix.
 - **Lock safety hatch, becoming the skip gesture:** `Config.safety_unlock` (on, confirmed 2026-08-09) releases the lock if you hold Escape for 3s. Originally a temporary weakening while the lock was young code — a bug in a 25-minute unattended lock strands you on your own machine — it is now **kept permanently** and repurposed: in Phase 3 the same gesture opens the 5/10/20-minute custom-skip menu instead of plainly unlocking (docs/SPEC.md §4B). Ctrl+Alt+Del is never blocked: that needs a kernel driver, which is the wrong trade for enforcing coffee breaks.
+- **Exclusions read Windows' own signals, not process names (2026-08-09).** Camera/microphone use comes from CapabilityAccessManager's ConsentStore registry keys — the ones behind the tray privacy indicator, where a live device has `LastUsedTimeStop = 0` — and presenting comes from `SHQueryUserNotificationState`. Chasing conferencing executables would break on every new or renamed tool, and a running app says nothing about whether a call is happening. **`chrome.exe` is the case that settles it:** browser-based Meet and Teams calls are invisible to process matching since Chrome is always running, but "Chrome is holding the microphone" identifies them exactly. Only `QUNS_PRESENTATION_MODE`/`QUNS_BUSY` count as presenting — full-screen games and video players deliberately don't, or a maximised player could hold breaks off all evening.
 - **Input suppression carries a UI-independent watchdog (2026-08-09).** A plain daemon thread holding no reference to tkinter force-releases suppression if a lock ever outlives its break by more than `Config.lock_max_overrun` (60s). Built during Phase 1 rather than deferred, because the shipped lock had no failsafe at all — a hung tick would have left input suppressed with no way out, the one failure a user cannot talk their way out of. The key distinction: it guards against **the app failing**, not against the user. It cannot be invoked, has no UI, and grants no discretionary escape — which is precisely what lets Phase 3 close the Escape route without losing any safety.
 - **Settings live outside the repo (2026-08-09).** `%APPDATA%\PomodoroGuardian\config.json`, with a `--config` override for development. Correct for a packaged `.exe` — config beside the binary breaks on upgrade and is unwritable under Program Files — and it keeps the secret calendar URL, a credential granting read access to the whole work calendar, structurally unable to reach a GitHub repo. The file is written in **minutes and hours** rather than seconds because it is meant to be hand-edited; conversion happens in `settings.py` so the engine never handles units. `Settings` wraps `Config` rather than extending it, so `timer.py` still only ever sees the rhythm values and stays pure. Two deliberate robustness choices, both tested: a corrupt file falls back to defaults rather than stopping the app (losing break enforcement to a stray comma is the wrong trade), and one malformed value costs only that value, not its neighbours.
 - **Dev environment:** Python 3.12.10 (winget) with a repo-local, gitignored `.venv`. Tests: `.venv\Scripts\python.exe -m pytest tests`.
@@ -143,6 +144,21 @@ Decisions closed this session: weekday cap 11h · weekend = Sat+Sun plus calenda
 **Not done, and the reason to prioritise it:** Phase 2 (video call / screen share exclusions). Until it exists the app will lock mid-meeting, so it's the one thing standing between this and daily use.
 
 **Next session:** start Phase 2 per `pomo-task-build-phase.md`. `docs/SPEC.md` §3 has the design; nothing blocks it.
+
+### Session 4 — 2026-08-09
+
+**Phase 2 built and unit-tested; one live check outstanding.** `exclusions.py` plus engine support for freezing, 62 tests (up from 45), and two new flags: `--exclusions` reports what is currently holding breaks off, `--no-exclusions` disables the mechanism.
+
+The detection approach is the substance here — see Architectural decisions above for why it reads Windows' own signals rather than matching process names.
+
+Three engine subtleties, each with a test:
+- **A long call must not abandon the session.** Two hours on a call with no typing is well past `idle_reset_after`; without special handling the interval would be discarded the instant the call ended. Idle is therefore measured from when the exclusion lifted, not from the last keystroke.
+- **Call time is never retroactively credited.** The work watermark is pinned during an exclusion, so the first keystroke after a meeting doesn't buy back its duration — the same class of bug as the sleep-wake one found in Phase 1.
+- **A break already locked runs its full course.** You cannot join a call through a lock, and cutting a break short would be worse than letting it finish.
+
+**Verification so far:** the parser was checked against this machine's real ConsentStore, which had history for Slack, Chrome, Zoom, Loom, the Camera app and Premiere — exercising both the packaged and `#`-encoded desktop key formats. That proves the reading and name-decoding are right, but every recorded entry had a non-zero stop time, so the **live** case (`LastUsedTimeStop = 0`) is still unproven. Needs a real call or the Camera app open, then `--exclusions`.
+
+**Accepted limitation:** an app that holds the microphone open silently disables break enforcement. The log warns after 2h of continuous exclusion but does not override it — overriding would mean locking the screen during what might be a genuine call.
 
 ### Session 2 — 2026-08-09
 
