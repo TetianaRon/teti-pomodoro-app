@@ -7,7 +7,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 ## Phases
 
 1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
-2. 🔄 Exclusions: video call / screen share detection — built and unit-tested 2026-08-09; awaiting a live positive check (a real call in progress)
+2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call
 3. ⏳ Break-skip system (calendar meeting skip + capped custom skip)
 4. ⏳ Daily work cap + Emergency Mode
 5. ⏳ Focus Mode
@@ -156,13 +156,21 @@ Three engine subtleties, each with a test:
 - **Call time is never retroactively credited.** The work watermark is pinned during an exclusion, so the first keystroke after a meeting doesn't buy back its duration — the same class of bug as the sleep-wake one found in Phase 1.
 - **A break already locked runs its full course.** You cannot join a call through a lock, and cutting a break short would be worse than letting it finish.
 
-**Verification so far:** the parser was checked against this machine's real ConsentStore, which had history for Slack, Chrome, Zoom, Loom, the Camera app and Premiere — exercising both the packaged and `#`-encoded desktop key formats. That proves the reading and name-decoding are right, but every recorded entry had a non-zero stop time, so the **live** case (`LastUsedTimeStop = 0`) is still unproven. Needs a real call or the Camera app open, then `--exclusions`.
+**Verified live against a real Google Meet call.** Five minutes of observation with the camera toggled and the mic muted: `chrome.exe` correctly identified holding both devices, the camera released within about a second of being switched off, and **the microphone stayed acquired for the whole call including while muted**. Phase 2 marked complete.
+
+That settles a limitation this plan had speculated about — a listen-only group call with camera off and mic muted **is** detected, because software mute sets `track.enabled = false` without handing the device back. The contributor predicted this correctly; the worry was unfounded. Measured for Chrome/Meet only; native Zoom and Teams are expected to behave the same but haven't been checked.
+
+**A NameError that would have crashed the app on the first real call.** `_join` was referenced in `WindowsDetector.check()` but never defined, so the detector raised the moment any device was actually in use. Nothing caught it: every unit test used `FakeDetector`, the earlier `--exclusions` run had nothing holding a device, and `py_compile` can't see a runtime name error. The failing branch needed the live path, which by definition had never run. Found only because the contributor asked to test with a real camera and call rather than trusting the review.
+
+Fixed, plus the six tests that were missing (`WindowsDetector` exercised with devices in use via monkeypatched readers), and `pyflakes` added to the toolchain to hunt the same bug class — an undefined name in a rarely-executed branch. One other finding, an unused import, removed. **This is the third instance today of code that read correctly, passed its tests, and was wrong**; it is worth treating "has this line ever actually executed?" as a standing question for anything that only fires on live hardware.
 
 **Accepted limitation:** an app that holds the microphone open silently disables break enforcement. After 2h of continuous exclusion the app now shows a standing corner banner naming what is holding the device, but does not override it — overriding would mean locking the screen during what might be a genuine call, the exact failure exclusions exist to prevent. Contributor confirmed calls should never be interrupted, so a stuck device is reported rather than overruled.
 
 **Banner handling is now state-driven, not event-driven** — and that fixed a bug introduced earlier the same session. Hiding the banner on `EXCLUSION_STARTED` meant that if a call began during the 2-minute warning and ended while the warning was still running, the banner never came back. `_update_banner()` now decides from the current state each tick, so there is no transition to miss. The banner also grew a general `set_text()`/`notice()` API; verified it re-anchors correctly as the message widens, from 164px up to 733px, staying inside the primary monitor.
 
 **Worth stating plainly, since it is easy to misread:** the 2h warning measures one *continuous* stretch, not a daily total — ordinary back-to-back meetings each start fresh and will never trigger it. And on a heavy meeting day the app does almost nothing by design: breaks do not accumulate, and none is owed when the calls end.
+
+**Next:** Phase 3 — the break-skip system (docs/SPEC.md §4): calendar meeting skip, plus the capped custom skip invoked by the hold-Escape gesture. `calendar_feed.py` already fetches and parses the feed, and the settings layer already stores the URL, so Phase 3 starts from the day-off/meeting-skip rules rather than from plumbing.
 
 ### Session 2 — 2026-08-09
 

@@ -58,6 +58,24 @@ the approach**: browser-based Meet and Teams calls are invisible to process
 matching, since Chrome is always running, but "Chrome is holding the
 microphone" identifies them exactly.
 
+**Confirmed live against a real Google Meet call (2026-08-09).** A five-minute
+observation with the camera toggled on and off and the microphone muted:
+
+- `chrome.exe` was correctly identified as holding both devices.
+- The **camera was released within about a second** of being switched off, so
+  camera state tracks the real toggle rather than lagging behind it.
+- The **microphone stayed acquired for the entire call** — through every
+  camera toggle, and while muted. Muting in Meet sets `track.enabled = false`
+  without handing the device back, so the exclusion held throughout.
+
+That last point settles a limitation this spec had speculated about: **a
+listen-only group call, camera off and microphone muted, is still detected.**
+The worry that such calls would be invisible was wrong.
+
+The measurement is specific to Chrome and Meet. Software mute keeping a
+capture device acquired is standard behaviour, so native Zoom and Teams are
+expected to match, but that has not been measured.
+
 **Freezing behaviour.** While excluded, the work countdown freezes rather than
 running on, no session starts from activity, and time on the call is never
 retroactively credited as work once typing resumes. A break *already* locked
