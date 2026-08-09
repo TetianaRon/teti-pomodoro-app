@@ -1,0 +1,81 @@
+"""Tunable timings for the core loop.
+
+Everything is seconds, so the state machine never has to do unit maths.
+Values live here rather than in the engine because docs/SPEC.md §10 flags
+several of them as still-open decisions — changing one should be a
+one-line edit, not a hunt through the logic.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+MINUTE = 60
+
+
+@dataclass(frozen=True)
+class Config:
+    """Timing knobs for one Pomodoro rhythm."""
+
+    # --- Rhythm (SPEC §2.2) ---
+    work_duration: float = 25 * MINUTE
+    short_break_duration: float = 5 * MINUTE
+    long_break_duration: float = 15 * MINUTE
+    long_break_every: int = 4
+
+    # --- Break enforcement (SPEC §2.3) ---
+    # How long before the lock the warning appears, so you can wrap up.
+    warning_lead: float = 2 * MINUTE
+
+    # --- Detection (SPEC §2.1) ---
+    # Input is "active" if the last keystroke/click was this recent. Bridges
+    # the ordinary gaps in real typing so reading a paragraph mid-sentence
+    # doesn't read as stepping away.
+    input_gap: float = 30.0
+    # Sustained activity needed to auto-start a tracked work session.
+    start_threshold: float = 1 * MINUTE
+
+    # --- Idle handling (SPEC §2.4) ---
+    # Past this, a work session stops accruing time — you're not there.
+    idle_pause_after: float = 2 * MINUTE
+    # Past this, you've genuinely left: the part-finished work interval is
+    # discarded and the long-break cycle count resets. This is the
+    # "reset after an idle gap" answer to SPEC §10's open question,
+    # chosen over a fixed daily reset time (Session 3).
+    idle_reset_after: float = 60 * MINUTE
+
+    # --- Robustness ---
+    # A tick longer than this means the machine slept, the process was
+    # suspended, or the clock jumped. Treated as an idle gap rather than
+    # silently credited as work time.
+    max_tick: float = 30.0
+
+    # --- Safety (Phase 1 only; see overlay.py) ---
+    # Holding Escape for this long releases the lock. Enforcement is
+    # deliberately weakened while the lock is still unproven code — set
+    # safety_unlock to False once you trust it not to strand you.
+    safety_unlock: bool = True
+    safety_unlock_hold: float = 3.0
+
+    def scaled(self, factor: float) -> "Config":
+        """Return a copy with every duration divided by `factor`.
+
+        Used by the `--demo` smoke test so a full 25/5 cycle plus a long
+        break can be watched end to end in a couple of minutes.
+        """
+        if factor <= 0:
+            raise ValueError("scale factor must be positive")
+        return replace(
+            self,
+            work_duration=self.work_duration / factor,
+            short_break_duration=self.short_break_duration / factor,
+            long_break_duration=self.long_break_duration / factor,
+            warning_lead=self.warning_lead / factor,
+            input_gap=self.input_gap / factor,
+            start_threshold=self.start_threshold / factor,
+            idle_pause_after=self.idle_pause_after / factor,
+            idle_reset_after=self.idle_reset_after / factor,
+        )
+
+
+DEFAULT = Config()
