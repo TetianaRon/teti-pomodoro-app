@@ -130,7 +130,19 @@ The Test button matters more than it looks: a wrong URL fails immediately with a
 
 Verified end to end: the window opened, saved, and reloaded correctly, with the stored URL confirmed as a genuine `basic.ics` secret address.
 
-**Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Still outstanding: decide whether `safety_unlock` stays on now that the Escape release is proven.
+### Session close — 2026-08-09
+
+**Phase 1 complete and verified on real hardware; first-run setup and the settings layer built ahead of their Phase 8 slot. Every open item raised across all three sessions is now resolved.** 16 commits, 45 tests, working tree clean and pushed.
+
+Decisions closed this session: weekday cap 11h · weekend = Sat+Sun plus calendar-driven holidays and vacations · Emergency Mode as one shared 3h/week pool · long break 15 min · app name kept as Pomodoro Guardian · manual day-type override, asymmetrically budgeted · calendar access is free/busy only, no OAuth · the ≥6h day-off rule derived from real data · `safety_unlock` kept permanently and repurposed as the Phase 3 skip gesture · what happens when the skip budget is spent.
+
+**Two things worth carrying forward as habits, both of which caught real bugs today:**
+1. **Assert on the rendered result, not the requested one.** The 5-second lock smoke test checked window geometry and passed through three separate layout bugs — content stacked at the top edge, centring computed against the virtual-screen bounding box, and a 48px banner spilling onto a second monitor.
+2. **Check the data before writing the rule.** The day-off rule was drafted from reasoning about how all-day events "should" appear and would have shipped catching vacations while silently missing every company holiday. Ten minutes with the real export corrected it.
+
+**Not done, and the reason to prioritise it:** Phase 2 (video call / screen share exclusions). Until it exists the app will lock mid-meeting, so it's the one thing standing between this and daily use.
+
+**Next session:** start Phase 2 per `pomo-task-build-phase.md`. `docs/SPEC.md` §3 has the design; nothing blocks it.
 
 ### Session 2 — 2026-08-09
 
