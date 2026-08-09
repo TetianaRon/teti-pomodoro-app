@@ -46,6 +46,33 @@ If Google Calendar shows a meeting in progress at the moment a break would trigg
 **B. Custom skip — capped.**
 A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 minutes. All custom skips share one **60-minutes-per-day accumulated cap**. Once the daily 60 minutes are used, no more custom skips are available that day — the lock enforces normally.
 
+**Invocation — hold Escape for 3 seconds (decided 2026-08-09).** Phase 1's
+safety release becomes this gesture rather than being replaced by it: holding
+Escape against the lock stops being a plain unlock and instead opens a small
+menu offering 5 / 10 / 20 minutes, with any option exceeding the remaining
+daily budget shown as unavailable. Choosing one dismisses the lock and debits
+the budget; dismissing the menu resumes the break.
+
+The gesture is a good fit — it is already deliberate rather than accidental,
+it is discoverable from the lock screen itself, and it needs no tray
+interaction at the one moment the tray is behind a full-screen window.
+
+**⚠️ This creates a tension that Phase 3 must resolve explicitly.** Today the
+Escape hold is an *unlimited, unbudgeted* release whose entire purpose is that
+it always works — Phase 1's lock is young code, and a bug in an unattended
+25-minute lock strands you on your own machine. A capped skip has the opposite
+requirement: past 60 minutes a day it must *stop* working, or the cap is
+decorative. The same gesture cannot be both.
+
+Resolving it means deciding what holding Escape does once the daily budget is
+spent. See §10.
+
+Whatever is decided, the safety property should be preserved structurally
+rather than by discretion: the lock should carry a **hard maximum duration**
+enforced independently of the UI, so a hung or buggy lock always releases
+itself even when no skip is available. That protects against the failure the
+safety hatch was guarding without handing back a discretionary escape.
+
 ## 5. Daily work cap + Emergency Mode
 
 - **Base cap: 11 hours** of tracked *work* time per working day (break time doesn't count toward this). Confirmed 2026-08-09.
@@ -235,6 +262,7 @@ Likely libraries:
 - ~~Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool.~~ **Both confirmed 2026-08-09**, and non-working days extended to cover holidays and vacations via the work calendar — see §5.
 - **New (2026-08-09):** how a full-day busy block actually renders in the shared free/busy feed — one interval per vacation day or one spanning the whole stretch, and which timezone the day boundaries fall in. Needs checking against real data at the start of Phase 3; §5's day-off rule depends on it.
 - ~~Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.~~ **Resolved 2026-08-09 — resets after an idle gap** (`Config.idle_reset_after`, default 60 min). Chosen over a fixed daily reset because it matches the auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset carries a count across a long lunch and resets one mid-evening. Implemented in Phase 1.
+- **New (2026-08-09):** what holding Escape does once the day's 60-minute custom-skip budget is spent — see §4B. The gesture currently guarantees an escape; the skip system requires that it stop. Phase 3 must pick one.
 - ~~App name/branding.~~ **Resolved 2026-08-09: Pomodoro Guardian**, kept after briefly considering the shorter "Pomo". The `pomo` abbreviation stays as the project/file prefix (`pomo-task-build-phase.md`); it is a shorthand, not the app's name.
 - ~~First-run setup flow.~~ **Built 2026-08-09**, and it was indeed much smaller than first assumed — pasting one URL, not an OAuth consent flow. A ttk window (`setup_dialog.py`) shown on first run or via `--setup`, covering the calendar URL (with a Test button that fetches and describes the feed), the rhythm, the safety unlock, the daily caps and the walking target. Settings persist to `%APPDATA%\PomodoroGuardian\config.json` — outside the repo, so the secret URL cannot be committed. Detection thresholds stay hand-editable in the JSON rather than being exposed as choices.
 
