@@ -34,15 +34,17 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - **Timer as a pure state machine:** `pomodoro_guardian/timer.py` takes its clock as an argument and returns events instead of firing callbacks — no threads, no sleeping, no UI. Everything with a real duration (a 25-minute interval, a 4th-cycle long break, an hour-long idle gap) is therefore testable in milliseconds without a display or input hooks, which matters because every other part of Phase 1 needs a live Windows session to exercise.
 - **Work is credited against input timestamps, not tick deltas:** the engine advances a watermark up to the last real keystroke. The 30s `input_gap` grace still bridges a pause in typing — it's paid retroactively when you resume — but silence is never credited on its own, and the first keystroke after the machine wakes can't buy back the hours it spent asleep. Two Phase 1 tests failed on exactly these before the fix.
 - **Lock safety hatch:** `Config.safety_unlock` (on by default) releases the lock if you hold Escape for 3s. Enforcement is deliberately weakened while the lock is young — a bug in a 25-minute unattended lock strands you on your own machine. Turn it off via `--no-safety-unlock` once it's proven itself. Ctrl+Alt+Del is never blocked: that needs a kernel driver, which is the wrong trade for enforcing coffee breaks.
+- **Settings live outside the repo (2026-08-09).** `%APPDATA%\PomodoroGuardian\config.json`, with a `--config` override for development. Correct for a packaged `.exe` — config beside the binary breaks on upgrade and is unwritable under Program Files — and it keeps the secret calendar URL, a credential granting read access to the whole work calendar, structurally unable to reach a GitHub repo. The file is written in **minutes and hours** rather than seconds because it is meant to be hand-edited; conversion happens in `settings.py` so the engine never handles units. `Settings` wraps `Config` rather than extending it, so `timer.py` still only ever sees the rhythm values and stays pure. Two deliberate robustness choices, both tested: a corrupt file falls back to defaults rather than stopping the app (losing break enforcement to a stray comma is the wrong trade), and one malformed value costs only that value, not its neighbours.
 - **Dev environment:** Python 3.12.10 (winget) with a repo-local, gitignored `.venv`. Tests: `.venv\Scripts\python.exe -m pytest tests`.
 - **Dev/documentation location:** this repo (`C:\Users\tetiana.ronska\repos\pomodoro-app`) is now the canonical, git-backed Claude Code/Cowork project — see `CLAUDE.md`. Work happens directly in this repo (via the Cowork device bridge or a native Claude Code session), not in a separate Claude-session workspace mirrored out afterward.
 
 ## Open items
 
-- First-run setup flow. Now just pasting the secret iCal URL — see the calendar-access decision below.
-- Whether to keep `Config.safety_unlock` (hold Escape to release the lock) on. Currently on — see Architectural decisions.
+- Whether to keep `Config.safety_unlock` (hold Escape to release the lock) on. Currently on, and now settable from the setup window rather than only a CLI flag.
 
 ### Resolved
+
+- ~~First-run setup flow~~ — **built 2026-08-09**, ahead of its Phase 8 slot. A ttk window shown on first run or via `--setup`, persisting to `%APPDATA%\PomodoroGuardian\config.json`. See the settings decision below.
 
 - ~~App name/branding~~ — **resolved 2026-08-09: Pomodoro Guardian.** Briefly renamed to "Pomo" and reverted; the contributor preferred the original. `pomo` remains the project/file prefix, as a shorthand rather than the app's name.
 - ~~Exact daily work cap~~ — **resolved 2026-08-09: 11h** on working days, 3h on non-working days. Config values, not hardcoded.
@@ -111,7 +113,19 @@ Confirmed by the contributor:
 
 **Banner design settled:** click-through (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`), readable at 90% by default and fading to 15% as the cursor approaches — a warning has two minutes to be noticed, so it should be visible, and hover is exactly when it should get out of the way. Hover is found by polling the cursor position, because a click-through window receives no mouse events and so never fires `<Enter>`/`<Leave>`.
 
-**Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Worth doing before Phase 2 starts: run the app for a real 25-minute cycle to confirm the lock behaves unattended, and decide whether `safety_unlock` stays on.
+### First-run setup built out of order (2026-08-09)
+
+Contributor picked this up next, ahead of its Phase 8 slot. Defensible: the settings layer is foundational, nothing depends on it, and it gives `safety_unlock` a home other than a CLI flag. The cost is that the calendar URL it collects sits unused until Phase 3.
+
+Added `settings.py` (persistence), `calendar_feed.py` (fetch and parse the free/busy feed) and `setup_dialog.py` (the ttk window), plus `--setup` and `--config PATH`. Test count went 16 → 41.
+
+`calendar_feed.py` deliberately stops at *validation*: fetch, parse busy blocks, describe what came back. The day-off and meeting-skip rules built on it stay Phase 3/4 work. Its parser was checked against the real 706-event export and matched the throwaway probe script exactly — same event count, same date range, same 24h longest block on 2026-07-17.
+
+The Test button matters more than it looks: a wrong URL fails immediately with a specific message instead of silently in Phase 3. Pasting the `?cid=` link — the exact mistake already made once this session — is detected and answered with a pointer to the secret address rather than a generic failure.
+
+Verified end to end: the window opened, saved, and reloaded correctly, with the stored URL confirmed as a genuine `basic.ics` secret address.
+
+**Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Still outstanding: decide whether `safety_unlock` stays on now that the Escape release is proven.
 
 ### Session 2 — 2026-08-09
 

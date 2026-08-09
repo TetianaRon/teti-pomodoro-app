@@ -58,7 +58,22 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pomodoro_guardian                 # for real
 .venv\Scripts\python.exe -m pomodoro_guardian --dry-run       # log only, never locks
 .venv\Scripts\python.exe -m pomodoro_guardian --demo 60       # 25s work / 5s break
+.venv\Scripts\python.exe -m pomodoro_guardian --setup         # settings window
 ```
+
+The first run opens a setup window: the work calendar's iCal address (with
+a Test button that fetches it and reports what it found), the rhythm, the
+lock's safety release, the daily caps and the walking target. Skip it and
+the defaults apply.
+
+Settings persist to `%APPDATA%\PomodoroGuardian\config.json`, in minutes
+and hours so the file can be edited by hand — `--config PATH` points
+somewhere else. Detection thresholds (input gap, idle timeouts) live only
+in that file, not in the window.
+
+⚠️ The calendar's **secret iCal address is a credential** — anyone holding
+it can read the whole calendar. It is stored outside the repo for exactly
+that reason; don't paste it into a file here.
 
 **The lock is real** — it covers every monitor and blocks keyboard and mouse.
 Ctrl+Alt+Del still works and always will. While `--no-safety-unlock` is off

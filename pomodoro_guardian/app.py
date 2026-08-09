@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import time
 import tkinter as tk
+from pathlib import Path
 
+from . import settings as settings_module
 from .activity import ActivityMonitor, create_monitor
 from .config import DEFAULT, Config
 from .overlay import LockOverlay, WarningBanner
@@ -147,13 +149,42 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable the hold-Escape release (use once you trust the lock)",
     )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="open the settings window, then exit",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="use a different settings file (default: %%APPDATA%%\\"
+             "PomodoroGuardian\\config.json)",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    path = args.config or settings_module.default_path()
 
-    config = DEFAULT
+    # First run, or an explicit --setup: show the window before anything
+    # else starts, so the settings the app runs on are the ones just saved.
+    first_run = not settings_module.exists(path)
+    settings = settings_module.load(path)
+    if args.setup or first_run:
+        from .setup_dialog import run_setup
+
+        saved = run_setup(settings, path, first_run=first_run)
+        if saved is not None:
+            settings = saved
+            print(f"settings saved to {path}")
+        elif first_run:
+            print("setup skipped — running with defaults")
+        if args.setup:
+            return 0
+
+    config = settings.config
     if args.demo:
         config = config.scaled(args.demo)
     if args.no_safety_unlock:
