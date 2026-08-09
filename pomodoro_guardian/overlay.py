@@ -235,6 +235,7 @@ class LockOverlay:
     MUTED = "#7c8899"
     FAINT = "#49525f"     # safety hint: legible, never the first thing seen
     ACCENT = "#8fb4d9"    # marks the long break as different
+    KEYCAP = "#e8eef7"    # filled keycap, so a digit reads as a key
 
     def __init__(
         self,
@@ -463,34 +464,53 @@ class LockOverlay:
 
     def _build_menu(self, body: tk.Frame) -> tk.Frame:
         frame = tk.Frame(body, bg=self.BG)
-        frame.pack(pady=(26, 0))
+        frame.pack(pady=(30, 0))
 
-        if not self._offer.any_available:
-            # Budget spent. The options are still shown, greyed, so an
-            # exhausted budget reads as a limit rather than a broken key.
-            tk.Label(
-                frame, text="Skip budget used up for today",
-                font=("Segoe UI", 15), bg=self.BG, fg=self.FG,
-            ).pack()
+        available = self._offer.any_available
+        tk.Label(
+            frame,
+            text=("Press a key to skip this break"
+                  if available else "Skip budget used up for today"),
+            font=("Segoe UI", 15), bg=self.BG, fg=self.FG,
+        ).pack()
 
         row = tk.Frame(frame, bg=self.BG)
-        row.pack(pady=(10, 0))
+        row.pack(pady=(16, 0))
         for index, option in enumerate(self._offer.options, start=1):
-            colour = self.FG if option.enabled else self.FAINT
-            tk.Label(
-                row, text=f"  {index} · {option.label}  ",
-                font=("Segoe UI", 16, "bold" if option.enabled else "normal"),
-                bg=self.BG, fg=colour,
-            ).pack(side="left", padx=6)
+            self._build_key(row, str(index), option)
 
         remaining = self._offer.remaining / 60
         tk.Label(
             frame,
-            text=(f"{remaining:.0f} min of skip left today  ·  "
-                  f"Esc to stay on the break"),
+            text=(f"{remaining:.0f} min of skip left today   ·   "
+                  f"release Esc, then press it again to stay on the break"),
             font=("Segoe UI", 11), bg=self.BG, fg=self.MUTED,
-        ).pack(pady=(14, 0))
+        ).pack(pady=(18, 0))
         return frame
+
+    def _build_key(self, row: tk.Frame, digit: str, option: SkipOption) -> None:
+        """One option, drawn so the digit reads as a key to press.
+
+        A bare "1 · 5 min" was tried first and did not communicate that the
+        number was an instruction rather than a label.
+        """
+        cell = tk.Frame(row, bg=self.BG)
+        cell.pack(side="left", padx=14)
+
+        enabled = option.enabled
+        tk.Label(
+            cell, text=f" {digit} ",
+            font=("Consolas", 20, "bold"),
+            bg=self.KEYCAP if enabled else self.BG,
+            fg=self.BG if enabled else self.FAINT,
+            relief="solid", borderwidth=1,
+            highlightbackground=self.FAINT,
+            padx=8, pady=2,
+        ).pack()
+        tk.Label(
+            cell, text=option.label, font=("Segoe UI", 13),
+            bg=self.BG, fg=self.FG if enabled else self.FAINT,
+        ).pack(pady=(6, 0))
 
     def _close_menu(self) -> None:
         for menu in self._menus:
