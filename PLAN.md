@@ -49,7 +49,7 @@ Created: `.gitattributes` (first commit, per repo-setup standard), `CLAUDE.md` (
 
 Superseded Session 1's dev-location decision (mirror-out-after-each-change via device bridge) — replaced with working directly in this repo as noted in Architectural decisions above.
 
-Added `README.md` and `requirements.txt`; wired the local repo to remote `git@github.com:TetianaRon/teti-pomodoro-app.git` (`git remote add origin`). The Cowork device bridge (`device_bash`) has no network access and no SSH credentials for the contributor's GitHub account, so the actual `git push` must be run by the contributor (or a native Claude Code session on their machine) — not something Claude can complete through this bridge.
+Added `README.md` and `requirements.txt`; wired the local repo to remote `git@github.com:TetianaRon/teti-pomodoro-app.git` (`git remote add origin`). The Cowork device bridge (`device_bash`) has no network access and no SSH credentials for the contributor's GitHub account, so the actual `git push` must be run by the contributor (or a native Claude Code session on their machine) — not something Claude can complete through this bridge. Also flagged the git-lock workaround itself as a `laivly-global-session` skill candidate directly in `CLAUDE.md`'s "Skill candidate" section, for a future PSB Improve pass to evaluate.
 
 **Next:** begin Phase 1 (core activity-detection + Pomodoro timer + lock overlay) using `pomo-task-build-phase.md`.
 

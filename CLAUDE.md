@@ -58,3 +58,12 @@ files — only move them. If a git command fails with "Unable to create
 '.git/index.lock': File exists", move the stale lock file aside (e.g. into
 an untracked `.git_lock_leftovers/` folder) and retry. This does not affect
 git run natively on this machine outside the bridge.
+
+## Skill candidate (flagged, not yet actioned)
+
+The device-bridge git-lock workaround above is generic to any Cowork
+project reached through `device_bash` with a git repo — not specific to
+this app. Flagged as a candidate for generalizing into
+`laivly-global-session`'s file-integrity guidance; not yet proposed or
+built. A future PSB Improve pass should evaluate whether to promote it out
+of this project's own instructions.
