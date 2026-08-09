@@ -9,7 +9,7 @@ You work long, unbroken stretches — including late evenings and nights — at 
 ## 2. Core loop
 
 1. **Detection.** Sustained keyboard/mouse activity (past a short threshold, e.g. continuous input for ~1–2 minutes) starts a tracked work session automatically. No manual "start" needed.
-2. **Rhythm.** Classic Pomodoro: 25 min work / 5 min break, with a longer break (15–20 min) every 4th cycle.
+2. **Rhythm.** Classic Pomodoro: 25 min work / 5 min break, with a **15 min** long break every 4th cycle — confirmed 2026-08-09, settling the earlier 15–20 min range. A config value, not hardcoded. In practice a long break lands roughly every 2 hours of tracked work.
 3. **Break enforcement.** When a break is due:
    - A 2-minute warning appears first (so you can save/wrap up a thought).
    - At zero, a full-screen, always-on-top, input-blocking overlay locks the screen for the break duration. This is a real block, not a reminder — closing/alt-tabbing away is not an escape hatch (see §6 for the one exception).

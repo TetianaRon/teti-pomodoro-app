@@ -88,6 +88,8 @@ Analysing that export — 706 events, 2026-06-10 → 2028-08-07 — produced the
 
 Also found: **`tzdata` is required on Windows** (no system IANA database, so `zoneinfo` can't resolve `America/Toronto` — the first analysis attempt crashed on exactly this), and computing day boundaries in UTC misattributes evening events to the next day. Both now recorded; `tzdata` added to `requirements.txt` and flagged for PyInstaller bundling in Phase 8. The Google OAuth client libraries are commented out of `requirements.txt` — kept as a documented fallback rather than deleted.
 
+Also confirmed the **long break is 15 min**, settling docs/SPEC.md §2.2's 15–20 min range — Phase 1 had implemented the bottom of that range as a default rather than a decision.
+
 Closed the last calendar-driven open item by adding the **manual day-type override** (docs/SPEC.md §5a) — the resolution to the one limitation the ≥6h rule couldn't engineer away.
 
 **Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Worth doing before Phase 2 starts: run the app for a real 25-minute cycle to confirm the lock behaves unattended, and decide whether `safety_unlock` stays on.
