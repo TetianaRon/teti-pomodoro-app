@@ -224,6 +224,76 @@ def test_multiple_reasons_are_all_reported():
     assert "camera" in described and "microphone" in described
 
 
+def _patch_devices(monkeypatch, *, webcam=(), microphone=(), presenting=False):
+    from pomodoro_guardian import exclusions
+
+    monkeypatch.setattr(
+        exclusions,
+        "devices_in_use",
+        lambda store: list(webcam if store == "webcam" else microphone),
+    )
+    monkeypatch.setattr(exclusions, "presenting_now", lambda: presenting)
+    return exclusions
+
+
+def test_windows_detector_names_the_app_holding_the_microphone(monkeypatch):
+    """The live path. Nothing exercised this before, and it was broken.
+
+    `_join` was referenced but never defined, so the real detector raised
+    NameError the moment any device was actually in use — invisible to
+    every test using FakeDetector, and to any check run while idle.
+    """
+    exclusions = _patch_devices(monkeypatch, microphone=["Zoom.exe"])
+    result = exclusions.WindowsDetector().check()
+
+    assert result.active
+    assert result.reasons == (Reason.MICROPHONE,)
+    assert "Zoom.exe" in result.describe()
+
+
+def test_windows_detector_reports_camera_and_microphone_together(monkeypatch):
+    exclusions = _patch_devices(
+        monkeypatch, webcam=["chrome.exe"], microphone=["chrome.exe"]
+    )
+    result = exclusions.WindowsDetector().check()
+
+    assert set(result.reasons) == {Reason.CAMERA, Reason.MICROPHONE}
+    assert "chrome.exe" in result.describe()
+
+
+def test_windows_detector_lists_several_apps_on_one_device(monkeypatch):
+    exclusions = _patch_devices(
+        monkeypatch, microphone=["Zoom.exe", "chrome.exe"]
+    )
+    described = exclusions.WindowsDetector().check().describe()
+
+    assert "Zoom.exe" in described and "chrome.exe" in described
+
+
+def test_windows_detector_is_clear_when_nothing_holds_a_device(monkeypatch):
+    exclusions = _patch_devices(monkeypatch)
+    assert not exclusions.WindowsDetector().check().active
+
+
+def test_presenting_alone_is_enough_to_exclude(monkeypatch):
+    exclusions = _patch_devices(monkeypatch, presenting=True)
+    result = exclusions.WindowsDetector().check()
+
+    assert result.reasons == (Reason.PRESENTING,)
+
+
+def test_disabled_signals_are_not_consulted(monkeypatch):
+    exclusions = _patch_devices(
+        monkeypatch, webcam=["chrome.exe"], microphone=["Zoom.exe"],
+        presenting=True,
+    )
+    detector = exclusions.WindowsDetector(
+        camera=False, microphone=False, presenting=False
+    )
+
+    assert not detector.check().active
+
+
 @pytest.mark.parametrize(
     "key_name,expected",
     [

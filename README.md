@@ -49,7 +49,7 @@ a Microsoft Store alias stub).
 
 ```
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt pytest
+.venv\Scripts\python.exe -m pip install -r requirements.txt pytest pyflakes
 ```
 
 ## Running
@@ -91,3 +91,10 @@ The Pomodoro state machine takes its clock as an argument, so the whole
 rhythm — 25-minute intervals, 4th-cycle long breaks, hour-long idle gaps —
 is covered without a display or a wait. The lock overlay and the global
 input hooks need a real Windows session and are smoke-tested by hand.
+
+Worth running too, since this codebase has rarely-executed branches that
+only fire on a live call or a real lock:
+
+```
+.venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
+```

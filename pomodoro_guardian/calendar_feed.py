@@ -15,7 +15,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 USER_AGENT = "PomodoroGuardian/0.1 (+local personal use)"
 DEFAULT_TIMEOUT = 15.0

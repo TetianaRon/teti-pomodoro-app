@@ -65,6 +65,11 @@ class Exclusion:
         return f"{text} ({self.detail})" if self.detail else text
 
 
+def _join(names: list[str]) -> str:
+    """Readable app list for an exclusion's detail line."""
+    return ", ".join(names)
+
+
 class Detector(Protocol):
     def check(self) -> Exclusion: ...
 
