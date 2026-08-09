@@ -110,7 +110,9 @@ class Application:
             self._log(f"{kind} started — locking")
             self.banner.hide()
             if not self.dry_run:
-                self.overlay.lock(snapshot.is_long_break)
+                # remaining == the full break length at the moment it starts,
+                # which the overlay needs to show a "back at HH:MM" time.
+                self.overlay.lock(snapshot.is_long_break, snapshot.remaining)
         elif event is Event.BREAK_ENDED:
             self._log(
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"
