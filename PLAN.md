@@ -8,7 +8,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
 2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call
-3. ⏳ Break-skip system (calendar meeting skip + capped custom skip)
+3. ✅ Break-skip system (calendar meeting skip + capped custom skip) — complete 2026-08-09
 4. ⏳ Daily work cap + Emergency Mode
 5. ⏳ Focus Mode
 6. ⏳ Walking/standing-desk manual tracking (toggle + 60 min/day tally + live effective work-cap formula)
@@ -170,7 +170,27 @@ Fixed, plus the six tests that were missing (`WindowsDetector` exercised with de
 
 **Worth stating plainly, since it is easy to misread:** the 2h warning measures one *continuous* stretch, not a daily total — ordinary back-to-back meetings each start fresh and will never trigger it. And on a heavy meeting day the app does almost nothing by design: breaks do not accumulate, and none is owed when the calls end.
 
-**Next:** Phase 3 — the break-skip system (docs/SPEC.md §4): calendar meeting skip, plus the capped custom skip invoked by the hold-Escape gesture. `calendar_feed.py` already fetches and parses the feed, and the settings layer already stores the URL, so Phase 3 starts from the day-off/meeting-skip rules rather than from plumbing.
+### Phase 3 complete — break-skip system (2026-08-09)
+
+Two paths, deliberately different mechanisms. The **calendar meeting skip** is modelled as another exclusion source rather than new machinery — §3 and §4A both mean "do not lock right now" — so it reuses Phase 2's freezing through `CombinedDetector`. The **custom skip** *defers* a break instead: work resumes with exactly the bought time left, which is what makes the 60-minute daily budget mean anything. A skipped break doesn't count toward the long-break cycle, because skipping is not taking.
+
+New modules: `calendar_watch.py` (background refresh, cached, stale data ignored), `state.py` (daily budgets, kept apart from settings so a corrupt tally can't cost you your configuration), `media.py`.
+
+**Missing or stale calendar data enforces breaks normally.** A network problem must not silently switch enforcement off; the cost of failing this way is an unwanted lock, which the skip answers.
+
+**Media is paused when the lock appears.** Four mechanisms were measured and three failed — see docs/SPEC.md §2.3. Only a real media keystroke works, and it is guarded by an audio check because the key is a *toggle*: fired into silence it would start playback on every quiet break.
+
+**Four bugs, none visible to code review or unit tests.** All four needed a real lock and a real keyboard:
+1. `NameError` in `WindowsDetector.check()` — only ran when a device was actually in use; would have crashed the app on the first call.
+2. `root.after()` called from the pynput listener thread — worked while `mainloop()` ran, raised "main thread is not in main loop" otherwise. Input now posts to a queue drained on the UI thread.
+3. Escape-hold detection depended on key **auto-repeat**; a single press could never fire it.
+4. The hold that opened the skip menu immediately closed it again — Escape auto-repeats at roughly **10 events per second** (606 across one 60-second lock), so the next repeat read as "dismiss" inside the same drain loop.
+
+**The diagnostic method mattered more than the diagnostics.** Three timed on-screen tests produced no usable data at all, because the prompts print to a console that is behind the lock. Only when the contributor ran `local/checklock.py` themselves — seeing prompts live, and the script reporting afterwards — did each stage become separable. Worth reusing for anything that only runs behind a lock.
+
+**Still unverified:** the calendar meeting skip has never fired live, since no meeting was in progress during testing. Same profile as the bugs above — a path that has not actually executed.
+
+**Next:** Phase 4 — daily work cap + Emergency Mode (docs/SPEC.md §5, §5a). The pieces are in place: `settings.py` holds the caps, `state.py` holds the daily tallies, and `calendar_feed.py` parses the blocks the day-off rule needs.
 
 ### Session 2 — 2026-08-09
 

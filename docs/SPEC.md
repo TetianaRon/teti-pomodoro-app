@@ -150,6 +150,19 @@ The gesture is a good fit — it is already deliberate rather than accidental,
 it is discoverable from the lock screen itself, and it needs no tray
 interaction at the one moment the tray is behind a full-screen window.
 
+**Built and verified 2026-08-09.** Two details worth recording, both found only
+by testing against a real keyboard:
+
+- **Escape auto-repeats at roughly 10 events per second** while held — 606
+  events across one 60-second lock. Since the gesture *is* a held Escape, the
+  menu has to ignore Escape until an actual key-up arrives, or the repeat that
+  follows the hold dismisses the menu the same instant it opens. Pressing
+  Escape again after releasing still dismisses it.
+- **The digits must look like keys.** A first version rendered "1 · 5 min" and
+  read as a label rather than an instruction. Each option is now a filled
+  keycap above its duration, under a heading that says to press one;
+  unavailable options keep the outline and lose the fill.
+
 **⚠️ This creates a tension that Phase 3 must resolve explicitly.** Today the
 Escape hold is an *unlimited, unbudgeted* release whose entire purpose is that
 it always works — Phase 1's lock is young code, and a bug in an unattended
