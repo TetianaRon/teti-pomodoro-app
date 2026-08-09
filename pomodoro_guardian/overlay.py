@@ -38,9 +38,11 @@ class InputSuppressor:
     def __init__(self, on_safety_hold: "callable | None" = None,
                  hold_seconds: float = 3.0,
                  max_seconds: float | None = None,
-                 on_key: "callable | None" = None) -> None:
+                 on_key: "callable | None" = None,
+                 on_key_release: "callable | None" = None) -> None:
         self._on_safety_hold = on_safety_hold
         self._on_key = on_key
+        self._on_key_release = on_key_release
         self._hold_seconds = hold_seconds
         self._max_seconds = max_seconds
         self._listeners: list = []
@@ -159,6 +161,11 @@ class InputSuppressor:
             self._on_safety_hold()
 
     def _on_release(self, key) -> None:
+        if self._on_key_release is not None:
+            try:
+                self._on_key_release(key)
+            except Exception:  # pragma: no cover - must not wedge input
+                pass
         if key != self._escape_key:
             return
         with self._lock:
@@ -249,6 +256,7 @@ class LockOverlay:
         self._menus: list[tk.Frame] = []
         self._offer = SkipOffer()
         self._menu_open = False
+        self._swallow_escape = False
         self._suppressor: InputSuppressor | None = None
         self._released_early = False
         # Input arrives on pynput's listener thread, and tkinter must only
@@ -303,6 +311,7 @@ class LockOverlay:
             # suppressed with no way out.
             max_seconds=duration + self._config.lock_max_overrun,
             on_key=self._key_pressed,
+            on_key_release=self._key_released,
         )
         self._suppressor.start()
 
@@ -411,6 +420,12 @@ class LockOverlay:
             ("key", getattr(key, "char", None), getattr(key, "name", None))
         )
 
+    def _key_released(self, key) -> None:
+        """Key-up, so the menu can tell a fresh press from a held one."""
+        self._pending.put(
+            ("keyup", getattr(key, "char", None), getattr(key, "name", None))
+        )
+
     def _drain(self) -> None:
         """Handle everything the listener posted. UI thread only."""
         while True:
@@ -425,12 +440,22 @@ class LockOverlay:
                     self.release()
                     return
                 self._open_menu()
+            elif kind == "keyup":
+                if name == "esc":
+                    # Escape is free to mean "dismiss" again now that the
+                    # hold which opened the menu has ended.
+                    self._swallow_escape = False
             elif kind == "key":
                 self._menu_key(char, name)
 
     def _open_menu(self) -> None:
         if self._menu_open or not self._windows:
             return
+        # The hold that opened this menu is still down, and Escape
+        # auto-repeats hard — measured at 606 events across one 60s lock.
+        # Without this the next repeat would immediately read as "dismiss"
+        # and close the menu in the same drain loop that opened it.
+        self._swallow_escape = True
         self._offer = self._skip_offer()
         self._menu_open = True
         for body in self._bodies:
@@ -477,6 +502,8 @@ class LockOverlay:
         if not self._menu_open:
             return
         if name == "esc":
+            if self._swallow_escape:
+                return   # still the hold that opened the menu
             self._close_menu()
             return
         if char and char.isdigit():
