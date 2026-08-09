@@ -9,6 +9,12 @@ pyinstaller>=6.0.0
 # (docs/SPEC.md §5) and must be bundled by PyInstaller in Phase 8.
 tzdata>=2024.1
 
+# Reads per-application audio levels, so the lock only sends a media key
+# when something is genuinely playing. Not cosmetic: the media key is a
+# toggle, and firing it into silence would START playback on every quiet
+# break. Pulls in comtypes. Phase 8 will need PyInstaller hooks for both.
+pycaw>=20240210
+
 # Calendar access needs no OAuth after all — the work calendar is reachable
 # as a secret iCal URL carrying free/busy data, which is a plain HTTPS fetch
 # plus an .ics parse (docs/SPEC.md §9). Keeping the Google client libraries

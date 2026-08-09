@@ -87,11 +87,11 @@ class Config:
     safety_unlock: bool = True
     safety_unlock_hold: float = 3.0
 
-    # Pause whatever is playing as the lock goes up. Uses the idempotent
-    # APPCOMMAND_MEDIA_PAUSE, so it never starts playback and is safe to
-    # broadcast. Media is not resumed afterwards: the break exists to get
-    # you away from the screen, and un-pausing on your behalf would be a
-    # surprise rather than a courtesy.
+    # Pause whatever is playing as the lock goes up. Sends a real media
+    # key, but only when audio is genuinely playing — the key is a toggle,
+    # so firing it into silence would start playback. Media is not resumed
+    # afterwards: the break exists to get you away from the screen, and
+    # un-pausing on your behalf would be a surprise, not a courtesy.
     pause_media_on_lock: bool = True
 
     # Hard ceiling on input suppression, enforced by a plain thread rather

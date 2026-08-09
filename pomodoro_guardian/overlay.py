@@ -258,7 +258,6 @@ class LockOverlay:
         # nothing here calls tkinter across threads: the listener posts here
         # and tick(), which is already on the UI thread, drains it.
         self._pending: queue.Queue = queue.Queue()
-        self._foreground_before_lock: int | None = None
 
     @property
     def visible(self) -> bool:
@@ -273,13 +272,12 @@ class LockOverlay:
         if self._windows:
             return
         self._released_early = False
-        # Captured before the overlay takes the foreground, so the pause can
-        # be aimed at whatever was actually playing.
-        self._foreground_before_lock = media.foreground_window()
         if self._config.pause_media_on_lock:
-            # A video would otherwise play on behind the overlay: audible,
-            # invisible, and unstoppable while input is suppressed.
-            media.pause(self._foreground_before_lock)
+            # Before the suppressor starts, or our own hook would swallow
+            # the media key. Only fires if something is actually playing —
+            # the key is a toggle, so firing it into silence would start
+            # playback instead of stopping it.
+            media.pause_if_playing()
         # Anything the listener posted against a previous lock is stale.
         while not self._pending.empty():
             self._pending.get_nowait()

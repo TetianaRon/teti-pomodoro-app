@@ -25,6 +25,29 @@ You work long, unbroken stretches — including late evenings and nights — at 
 | `idle_pause_after` | 2 min | When the session is shown as paused. Accrual has already stopped at the last keystroke; this is the user-visible signal. |
 | `idle_reset_after` | 60 min | When the part-finished interval is discarded and the long-break cycle count resets. |
 
+**Media is paused when the lock appears (added 2026-08-09).** A video would
+otherwise carry on behind the overlay — audible, invisible, and impossible to
+stop while input is suppressed. Four mechanisms were measured on the real
+machine; three failed:
+
+| Mechanism | Result |
+| --- | --- |
+| `PostMessage` broadcast, `APPCOMMAND_MEDIA_PAUSE` | never arrived |
+| `SendMessageTimeout` broadcast | pauses, then something answers with a play and it resumes ~1s later |
+| `WM_APPCOMMAND` to the foreground window | the foreground at break time is whatever you are *working* in — measured as VS Code every time, never the media app |
+| **A real media keystroke** | **works** — Windows routes it to whichever app holds the media session, regardless of focus |
+
+The key is sent *before* input suppression starts, or the lock's own hook
+would swallow it. **It is only sent when audio is actually playing**, checked
+via per-application peak levels: `VK_MEDIA_PLAY_PAUSE` is a toggle, so firing
+it into silence would *start* playback on every quiet break — worse than the
+problem being solved. If the audio check is unavailable the key is not sent at
+all, failing towards doing nothing.
+
+Media is **not** resumed afterwards. The break exists to get you away from the
+screen, and un-pausing on your behalf would be a surprise rather than a
+courtesy.
+
 The lock blocks keyboard and mouse but deliberately **not Ctrl+Alt+Del** — blocking the Secure Attention Sequence needs a kernel driver. It stays as the last-resort exit, alongside closing the app (SPEC §5's intentional escape hatch). A `safety_unlock` setting additionally releases the lock on a 3-second Escape hold; it is on by default while the lock is new code and is expected to be turned off once proven.
 
 ## 3. Never-interrupt exclusions
