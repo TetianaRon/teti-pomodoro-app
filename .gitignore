@@ -1,0 +1,15 @@
+.git_lock_leftovers/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.spec
+*.egg-info/
+venv/
+.venv/
+*.db
+*.sqlite3
+token.json
+credentials.json
+.env
