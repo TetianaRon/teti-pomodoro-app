@@ -17,10 +17,13 @@ it off once you've watched it behave.
 from __future__ import annotations
 
 import atexit
+import queue
 import threading
 import time
 import tkinter as tk
+from dataclasses import dataclass
 
+from . import media
 from .config import DEFAULT, Config
 
 
@@ -34,8 +37,10 @@ class InputSuppressor:
 
     def __init__(self, on_safety_hold: "callable | None" = None,
                  hold_seconds: float = 3.0,
-                 max_seconds: float | None = None) -> None:
+                 max_seconds: float | None = None,
+                 on_key: "callable | None" = None) -> None:
         self._on_safety_hold = on_safety_hold
+        self._on_key = on_key
         self._hold_seconds = hold_seconds
         self._max_seconds = max_seconds
         self._listeners: list = []
@@ -113,6 +118,15 @@ class InputSuppressor:
         """Consume the event; suppress=True does the actual blocking."""
 
     def _on_press(self, key) -> None:
+        # Forwarded to the skip menu. The key is still suppressed from every
+        # other app — the menu sees it, nothing else does, which is what
+        # lets a keyboard-driven menu work behind a total input block.
+        if self._on_key is not None:
+            try:
+                self._on_key(key)
+            except Exception:  # pragma: no cover - a UI slip must not wedge input
+                pass
+
         if self._on_safety_hold is None or key != self._escape_key:
             return
         with self._lock:
@@ -160,6 +174,27 @@ def primary_rect(root: tk.Tk) -> tuple[int, int, int, int]:
     return rects[0]
 
 
+@dataclass(frozen=True)
+class SkipOption:
+    """One entry in the skip menu (SPEC §4B)."""
+
+    seconds: float
+    label: str
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class SkipOffer:
+    """What the skip menu should show when it opens."""
+
+    options: tuple[SkipOption, ...] = ()
+    remaining: float = 0.0
+
+    @property
+    def any_available(self) -> bool:
+        return any(o.enabled for o in self.options)
+
+
 class LockOverlay:
     """The break window itself, one per monitor."""
 
@@ -169,13 +204,36 @@ class LockOverlay:
     FAINT = "#49525f"     # safety hint: legible, never the first thing seen
     ACCENT = "#8fb4d9"    # marks the long break as different
 
-    def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        config: Config = DEFAULT,
+        skip_offer: "callable | None" = None,
+        on_skip: "callable | None" = None,
+    ) -> None:
         self._root = root
         self._config = config
+        # SPEC §4B. With no offer provided the hold-Escape gesture keeps its
+        # Phase 1 meaning and simply releases the lock — used by tests and
+        # by --no-exclusions style development runs.
+        self._skip_offer = skip_offer
+        self._on_skip = on_skip
         self._windows: list[tk.Toplevel] = []
         self._countdowns: list[tk.Label] = []
+        self._bodies: list[tk.Frame] = []
+        self._menus: list[tk.Frame] = []
+        self._offer = SkipOffer()
+        self._menu_open = False
         self._suppressor: InputSuppressor | None = None
         self._released_early = False
+        # Input arrives on pynput's listener thread, and tkinter must only
+        # ever be touched from the thread running its loop. Even root.after()
+        # is unsafe from outside — it happens to work while mainloop() is
+        # running and raises "main thread is not in main loop" otherwise. So
+        # nothing here calls tkinter across threads: the listener posts here
+        # and tick(), which is already on the UI thread, drains it.
+        self._pending: queue.Queue = queue.Queue()
+        self._foreground_before_lock: int | None = None
 
     @property
     def visible(self) -> bool:
@@ -190,29 +248,44 @@ class LockOverlay:
         if self._windows:
             return
         self._released_early = False
+        # Captured before the overlay takes the foreground, so the pause can
+        # be aimed at whatever was actually playing.
+        self._foreground_before_lock = media.foreground_window()
+        if self._config.pause_media_on_lock:
+            # A video would otherwise play on behind the overlay: audible,
+            # invisible, and unstoppable while input is suppressed.
+            media.pause(self._foreground_before_lock)
+        # Anything the listener posted against a previous lock is stale.
+        while not self._pending.empty():
+            self._pending.get_nowait()
 
         heading = "Long break" if is_long_break else "Break"
         back_at = time.strftime("%H:%M", time.localtime(time.time() + duration))
 
+        self._menu_open = False
         for rect in monitor_rects(self._root):
-            window, countdown = self._build_window(rect, heading, back_at,
-                                                   is_long_break)
+            window, countdown, body = self._build_window(
+                rect, heading, back_at, is_long_break
+            )
             self._windows.append(window)
             self._countdowns.append(countdown)
+            self._bodies.append(body)
 
         self._suppressor = InputSuppressor(
-            on_safety_hold=self._safety_release
+            on_safety_hold=self._safety_hold
             if self._config.safety_unlock
             else None,
             hold_seconds=self._config.safety_unlock_hold,
             # Independent of the UI loop, so a hung tick can't leave input
             # suppressed with no way out.
             max_seconds=duration + self._config.lock_max_overrun,
+            on_key=self._key_pressed,
         )
         self._suppressor.start()
 
     def tick(self, remaining: float) -> None:
-        """Refresh the countdown and reassert always-on-top."""
+        """Refresh the countdown, handle input, and reassert always-on-top."""
+        self._drain()
         if not self._windows:
             return
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
@@ -234,6 +307,9 @@ class LockOverlay:
             window.destroy()
         self._windows = []
         self._countdowns = []
+        self._bodies = []
+        self._menus = []
+        self._menu_open = False
 
     # -- internals ----------------------------------------------------
 
@@ -279,24 +355,114 @@ class LockOverlay:
         ).pack(pady=(pt(12), 0))
 
         if self._config.safety_unlock:
+            hint = (
+                f"hold Esc for {self._config.safety_unlock_hold:.0f}s "
+                f"to skip this break"
+                if self._skip_offer is not None
+                else f"hold Esc for {self._config.safety_unlock_hold:.0f}s "
+                     f"to release"
+            )
             tk.Label(
-                window,
-                text=(
-                    f"hold Esc for "
-                    f"{self._config.safety_unlock_hold:.0f}s to release"
-                ),
+                window, text=hint,
                 font=("Segoe UI", pt(10)), bg=self.BG, fg=self.FAINT,
             ).place(relx=0.5, rely=0.94, anchor="center")
 
         window.update_idletasks()
         window.lift()
         window.focus_force()
-        return window, countdown
+        return window, countdown, body
 
-    def _safety_release(self) -> None:
-        """Called from the listener thread — hand back to the UI thread."""
-        self._released_early = True
-        self._root.after(0, self.release)
+    # -- the skip menu (SPEC §4B) -------------------------------------
+
+    def _safety_hold(self) -> None:
+        """Escape held for 3s. Runs on the listener thread — post, don't act."""
+        self._pending.put(("hold", None, None))
+
+    def _key_pressed(self, key) -> None:
+        """A suppressed keystroke. Also the listener thread.
+
+        Queued unconditionally, not only while the menu is open: the media
+        controls answer at any point during a break.
+        """
+        self._pending.put(
+            ("key", getattr(key, "char", None), getattr(key, "name", None))
+        )
+
+    def _drain(self) -> None:
+        """Handle everything the listener posted. UI thread only."""
+        while True:
+            try:
+                kind, char, name = self._pending.get_nowait()
+            except queue.Empty:
+                return
+            if kind == "hold":
+                if self._skip_offer is None:
+                    # Phase 1 behaviour: no skip system wired up, so release.
+                    self._released_early = True
+                    self.release()
+                    return
+                self._open_menu()
+            elif kind == "key":
+                self._menu_key(char, name)
+
+    def _open_menu(self) -> None:
+        if self._menu_open or not self._windows:
+            return
+        self._offer = self._skip_offer()
+        self._menu_open = True
+        for body in self._bodies:
+            self._menus.append(self._build_menu(body))
+
+    def _build_menu(self, body: tk.Frame) -> tk.Frame:
+        frame = tk.Frame(body, bg=self.BG)
+        frame.pack(pady=(26, 0))
+
+        if not self._offer.any_available:
+            # Budget spent. The options are still shown, greyed, so an
+            # exhausted budget reads as a limit rather than a broken key.
+            tk.Label(
+                frame, text="Skip budget used up for today",
+                font=("Segoe UI", 15), bg=self.BG, fg=self.FG,
+            ).pack()
+
+        row = tk.Frame(frame, bg=self.BG)
+        row.pack(pady=(10, 0))
+        for index, option in enumerate(self._offer.options, start=1):
+            colour = self.FG if option.enabled else self.FAINT
+            tk.Label(
+                row, text=f"  {index} · {option.label}  ",
+                font=("Segoe UI", 16, "bold" if option.enabled else "normal"),
+                bg=self.BG, fg=colour,
+            ).pack(side="left", padx=6)
+
+        remaining = self._offer.remaining / 60
+        tk.Label(
+            frame,
+            text=(f"{remaining:.0f} min of skip left today  ·  "
+                  f"Esc to stay on the break"),
+            font=("Segoe UI", 11), bg=self.BG, fg=self.MUTED,
+        ).pack(pady=(14, 0))
+        return frame
+
+    def _close_menu(self) -> None:
+        for menu in self._menus:
+            menu.destroy()
+        self._menus = []
+        self._menu_open = False
+
+    def _menu_key(self, char: str | None, name: str | None) -> None:
+        if not self._menu_open:
+            return
+        if name == "esc":
+            self._close_menu()
+            return
+        if char and char.isdigit():
+            index = int(char) - 1
+            if 0 <= index < len(self._offer.options):
+                option = self._offer.options[index]
+                if option.enabled and self._on_skip is not None:
+                    self._close_menu()
+                    self._on_skip(option.seconds)
 
 
 class WarningBanner:

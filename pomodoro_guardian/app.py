@@ -12,11 +12,22 @@ import time
 import tkinter as tk
 from pathlib import Path
 
+from datetime import date
+
 from . import settings as settings_module
+from . import state as state_module
 from .activity import ActivityMonitor, create_monitor
+from .calendar_watch import CalendarWatcher
 from .config import DEFAULT, Config
-from .exclusions import Detector, Exclusion, NullDetector, create_detector
-from .overlay import LockOverlay, WarningBanner
+from .exclusions import (
+    CombinedDetector,
+    Detector,
+    Exclusion,
+    MeetingDetector,
+    NullDetector,
+    create_detector,
+)
+from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
 TICK_MS = 1000
@@ -29,11 +40,14 @@ class Application:
         monitor: ActivityMonitor | None = None,
         dry_run: bool = False,
         detector: Detector | None = None,
+        watcher: CalendarWatcher | None = None,
+        state_file: Path | None = None,
     ) -> None:
         self.config = config
         self.dry_run = dry_run
         self.monitor = monitor if monitor is not None else create_monitor()
-        self.detector = (
+        self.watcher = watcher
+        device_detector = (
             detector
             if detector is not None
             else create_detector(
@@ -42,6 +56,15 @@ class Application:
                 presenting=config.exclude_on_presenting,
             )
         )
+        # The calendar meeting skip (SPEC §4A) is just another exclusion —
+        # §3 and §4A both mean "do not lock right now".
+        self.detector: Detector = (
+            CombinedDetector(device_detector, MeetingDetector(watcher))
+            if watcher is not None and watcher.configured
+            else device_detector
+        )
+        self._state_file = state_file
+        self._state = state_module.load(state_file)
         self.engine = PomodoroEngine(config, now=time.monotonic())
         self._excluded_since: float | None = None
         self._warned_long_exclusion = False
@@ -50,11 +73,55 @@ class Application:
         self._root = tk.Tk()
         self._root.withdraw()  # the controller window is never shown
         self._root.title("Pomodoro Guardian")
-        self.overlay = LockOverlay(self._root, config)
+        self.overlay = LockOverlay(
+            self._root, config,
+            skip_offer=self._skip_offer,
+            on_skip=self._take_skip,
+        )
         self.banner = WarningBanner(self._root, config)
+
+    # -- custom skip (SPEC §4B) ---------------------------------------
+
+    def _skip_offer(self) -> SkipOffer:
+        """What the hold-Escape menu should show right now."""
+        budget = self.config.custom_skip_daily_budget
+        options = tuple(
+            SkipOption(
+                seconds=seconds,
+                label=f"{seconds / 60:.0f} min",
+                enabled=self._state.can_skip(seconds, budget),
+            )
+            for seconds in self.config.custom_skip_options
+        )
+        return SkipOffer(options, self._state.skip_remaining(budget))
+
+    def _take_skip(self, seconds: float) -> None:
+        """Spend part of the daily budget and push the break back."""
+        self._state = self._state.with_skip(seconds)
+        try:
+            state_module.save(self._state, self._state_file)
+        except OSError as exc:
+            # Losing the tally is bad but not worth refusing the skip over.
+            self._log(f"warning: could not save skip budget ({exc})")
+        self.overlay.release()
+        self.engine.defer_break(seconds, time.monotonic())
+        left = self._state.skip_remaining(self.config.custom_skip_daily_budget)
+        self._log(
+            f"break skipped for {seconds / 60:.0f} min "
+            f"({left / 60:.0f} min of budget left today)"
+        )
+
+    def _roll_state(self) -> None:
+        """Reset the day's budgets when the date changes under a long run."""
+        today = date.today()
+        if self._state.day != today:
+            self._state = self._state.rolled_to(today)
+            self._log("new day — skip budget reset")
 
     def run(self) -> None:
         self.monitor.start()
+        if self.watcher is not None:
+            self.watcher.start()
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
@@ -75,11 +142,14 @@ class Application:
         self.overlay.release()
         self.banner.hide()
         self.monitor.stop()
+        if self.watcher is not None:
+            self.watcher.stop()
 
     # -- loop ---------------------------------------------------------
 
     def _tick(self) -> None:
         now = time.monotonic()
+        self._roll_state()
         exclusion = self.detector.check()
         self._exclusion = exclusion
         events = self.engine.update(
@@ -248,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def report_exclusions(config: Config) -> int:
+def report_exclusions(config: Config, settings) -> int:
     """`--exclusions`: say what is holding breaks off right now, and why."""
     from .exclusions import devices_in_use, presenting_now
 
@@ -257,17 +327,43 @@ def report_exclusions(config: Config) -> int:
         microphone=config.exclude_on_microphone,
         presenting=config.exclude_on_presenting,
     )
-    exclusion = detector.check()
-
-    print("Never-interrupt exclusions (SPEC §3)\n")
+    print("Never-interrupt exclusions (SPEC §3, §4A)\n")
     print(f"  camera in use by  : {_or_none(devices_in_use('webcam'))}")
     print(f"  microphone in use : {_or_none(devices_in_use('microphone'))}")
     print(f"  presenting        : {presenting_now()}")
+
+    watcher = CalendarWatcher(
+        settings.calendar_url, day_off_hours=settings.day_off_block_hours
+    )
+    meeting = None
+    if watcher.configured:
+        print("\n  fetching calendar…", flush=True)
+        watcher.refresh_now()
+        meeting = watcher.meeting_now()
+    print(f"  calendar          : {watcher.status()}")
+    if meeting is not None:
+        print(
+            f"  meeting now       : {meeting.hours:.2f}h block, ends "
+            f"{meeting.end.astimezone():%H:%M}"
+        )
+    else:
+        print("  meeting now       : none")
+
+    combined = (
+        CombinedDetector(detector, MeetingDetector(watcher))
+        if watcher.configured
+        else detector
+    )
+    exclusion = combined.check()
     print()
     if exclusion.active:
         print(f"  -> BREAKS HELD OFF: {exclusion.describe()}")
     else:
         print("  -> nothing blocking a break")
+
+    state = state_module.load(state_module.state_path())
+    left = state.skip_remaining(config.custom_skip_daily_budget) / 60
+    print(f"\n  custom skip left today: {left:.0f} min")
     return 0
 
 
@@ -297,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = settings.config
     if args.exclusions:
-        return report_exclusions(config)
+        return report_exclusions(config, settings)
     if args.demo:
         config = config.scaled(args.demo)
     if args.no_safety_unlock:
@@ -305,10 +401,16 @@ def main(argv: list[str] | None = None) -> int:
 
         config = replace(config, safety_unlock=False)
 
+    watcher = CalendarWatcher(
+        None if args.no_exclusions else settings.calendar_url,
+        day_off_hours=settings.day_off_block_hours,
+    )
     app = Application(
         config=config,
         dry_run=args.dry_run,
         detector=NullDetector() if args.no_exclusions else None,
+        watcher=watcher,
+        state_file=state_module.state_path(path),
     )
     try:
         app.run()

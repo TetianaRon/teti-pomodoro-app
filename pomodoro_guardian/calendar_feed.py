@@ -181,3 +181,39 @@ def summarize(text: str) -> FeedSummary:
 def check(url: str, timeout: float = DEFAULT_TIMEOUT) -> FeedSummary:
     """Fetch and describe, for the setup dialog's Test button."""
     return summarize(fetch(url, timeout))
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """Parsed busy blocks, ready to answer questions about a moment in time."""
+
+    blocks: tuple[BusyBlock, ...] = ()
+    timezone_name: str | None = None
+
+    @classmethod
+    def from_feed(cls, text: str) -> "Schedule":
+        blocks, _ = parse_busy_blocks(text)
+        lines = unfold(text)
+        return cls(tuple(blocks), _property(lines, "X-WR-TIMEZONE"))
+
+    def meeting_at(
+        self, when: datetime, day_off_hours: float = 6.0
+    ) -> BusyBlock | None:
+        """The meeting covering `when`, if there is one.
+
+        Blocks at least `day_off_hours` long are **not** meetings — they are
+        how a holiday or vacation appears in a free/busy feed (SPEC §5). Left
+        unfiltered they would match all day and suppress break enforcement
+        for an entire day off, the exact opposite of what the reduced cap
+        intends. The two rules partition the same data.
+
+        Where meetings overlap, the one ending latest wins, so back-to-back
+        or double-booked slots suppress breaks until the last one finishes.
+        """
+        covering = [
+            b
+            for b in self.blocks
+            if b.start <= when < b.end and b.hours < day_off_hours
+        ]
+        return max(covering, key=lambda b: b.end) if covering else None
+

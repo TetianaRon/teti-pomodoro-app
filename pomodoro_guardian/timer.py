@@ -42,6 +42,7 @@ class Event(Enum):
     CYCLES_RESET = "cycles_reset"    # long-break counter cleared by an idle gap
     EXCLUSION_STARTED = "exclusion_started"  # call/screen share holds the break
     EXCLUSION_ENDED = "exclusion_ended"
+    BREAK_DEFERRED = "break_deferred"        # custom skip bought more time
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,26 @@ class PomodoroEngine:
         }[self.state]
         events += handler(now, last_input_at, is_active)
         return events
+
+    def defer_break(self, seconds: float, now: float) -> Event:
+        """Push the break back by `seconds` — the custom skip (SPEC §4B).
+
+        The break is delayed, not cancelled: work resumes with exactly
+        `seconds` left on the interval, so the lock returns when the bought
+        time runs out. That is what makes the 60-minute daily budget mean
+        something — each skip spends real minutes rather than dismissing a
+        break outright.
+
+        The cycle count is untouched: a skipped break is not a taken one,
+        so it must not bring the long break closer.
+        """
+        self.state = State.WORK
+        self._work_elapsed = max(0.0, self.config.work_duration - seconds)
+        self._credited_through = now
+        self._break_is_long = False
+        self._paused = False
+        self._active_since = None
+        return Event.BREAK_DEFERRED
 
     def snapshot(self) -> Snapshot:
         return Snapshot(

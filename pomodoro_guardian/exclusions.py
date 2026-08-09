@@ -45,6 +45,10 @@ class Reason(Enum):
     CAMERA = "camera in use"
     MICROPHONE = "microphone in use"
     PRESENTING = "presenting"
+    # SPEC §4A. The calendar meeting skip is an exclusion rather than a
+    # separate mechanism: §3 and §4A both mean "do not lock right now", and
+    # duplicating the freezing logic would be two things to keep in step.
+    MEETING = "meeting in progress"
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,43 @@ class NullDetector:
 
     def check(self) -> Exclusion:
         return Exclusion()
+
+
+class CombinedDetector:
+    """Union of several detectors — any one of them holds a break off."""
+
+    def __init__(self, *detectors: Detector) -> None:
+        self._detectors = [d for d in detectors if d is not None]
+
+    def check(self) -> Exclusion:
+        reasons: list[Reason] = []
+        details: list[str] = []
+        for detector in self._detectors:
+            found = detector.check()
+            for reason in found.reasons:
+                if reason not in reasons:
+                    reasons.append(reason)
+            if found.detail:
+                details.append(found.detail)
+        return Exclusion(tuple(reasons), "; ".join(details))
+
+
+class MeetingDetector:
+    """Excludes while the calendar shows a meeting in progress (SPEC §4A).
+
+    Unlimited and trust-based, per the spec: there is no cap on how much
+    meeting time can suppress breaks.
+    """
+
+    def __init__(self, watcher) -> None:
+        self._watcher = watcher
+
+    def check(self) -> Exclusion:
+        meeting = self._watcher.meeting_now()
+        if meeting is None:
+            return Exclusion()
+        ends = meeting.end.astimezone().strftime("%H:%M")
+        return Exclusion((Reason.MEETING,), f"until {ends}")
 
 
 class FakeDetector:

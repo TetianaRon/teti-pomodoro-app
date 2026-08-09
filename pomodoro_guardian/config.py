@@ -37,6 +37,14 @@ class Config:
     banner_alpha_hover: float = 0.15
     banner_hover_poll: float = 0.12
 
+    # --- Custom break skip (SPEC §4B) ---
+    # Fixed choices, offered by the hold-Escape menu against the lock. All
+    # skips draw on one accumulated daily budget; once it is spent the menu
+    # still opens, with every option greyed out, so an exhausted budget
+    # reads as a limit rather than a broken key.
+    custom_skip_options: tuple[float, ...] = (5 * MINUTE, 10 * MINUTE, 20 * MINUTE)
+    custom_skip_daily_budget: float = 60 * MINUTE
+
     # --- Never-interrupt exclusions (SPEC §3) ---
     # Which signals hold a break off. Camera and microphone are read from
     # the registry keys behind Windows' own privacy indicator; presenting
@@ -78,6 +86,13 @@ class Config:
     # safety_unlock to False once you trust it not to strand you.
     safety_unlock: bool = True
     safety_unlock_hold: float = 3.0
+
+    # Pause whatever is playing as the lock goes up. Uses the idempotent
+    # APPCOMMAND_MEDIA_PAUSE, so it never starts playback and is safe to
+    # broadcast. Media is not resumed afterwards: the break exists to get
+    # you away from the screen, and un-pausing on your behalf would be a
+    # surprise rather than a courtesy.
+    pause_media_on_lock: bool = True
 
     # Hard ceiling on input suppression, enforced by a plain thread rather
     # than the UI loop. If the lock ever outlives its break by this much —
