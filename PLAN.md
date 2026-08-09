@@ -24,7 +24,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - **Walking/standing-desk detection:** manual toggle only. Tapo-camera-based automatic detection (both desk-height classification and pose-estimation leg-motion detection) considered and explicitly ruled out — available camera views don't show the legs/under-desk area, a hardware constraint, not just an effort trade-off. See docs/SPEC.md §7.
 - **Work-cap ↔ walking interaction:** the daily work cap is not fixed — it's a live "effective cap" = base cap − max(0, 60 − minutes walked today), recalculated continuously. Emergency Mode stacks an additional +1h on top of whatever the effective cap is at the time of activation (confirmed with contributor).
 - **Weekday vs weekend base cap:** base cap is 10–11h on weekdays, **3h/day on weekends** (assumed Sat+Sun — flagged for confirmation). All other mechanics (effective-cap formula, Emergency Mode, its 3h/week shared budget) apply identically on both.
-- **Dev/documentation location:** developed and version-controlled in this Claude session's workspace; current files mirrored out to `C:\Users\tetiana.ronska\repos\pomodoro-app` on the contributor's machine via the device bridge after each meaningful change.
+- **Dev/documentation location:** this repo (`C:\Users\tetiana.ronska\repos\pomodoro-app`) is now the canonical, git-backed Claude Code/Cowork project — see `CLAUDE.md`. Work happens directly in this repo (via the Cowork device bridge or a native Claude Code session), not in a separate Claude-session workspace mirrored out afterward.
 
 ## Open items
 
@@ -34,6 +34,22 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - First-run setup flow details (Google OAuth consent screen, etc.).
 
 ## Session Worklog
+
+### Session 2 — 2026-08-09
+
+Ran PSB (Design - Project, MVP depth) to turn this repo into an actual Claude Code/Cowork project, per contributor request. Decisions:
+- Project abbreviation: `pomo`.
+- No standard tool connectors — repo-backed only (git + device bridge/native Claude Code).
+- Issues log: local `ISSUES.md` in the repo, Claude-writable directly (not a governed Jira/Confluence log).
+- No project-specific `qa-standards.md` — generic PSB Improve-mode standards are sufficient.
+
+Created: `.gitattributes` (first commit, per repo-setup standard), `CLAUDE.md` (instruction layer — identity, task routing, `laivly-global-session` invocation, behavioral rules, environment caveat), `pomo-task-build-phase.md` (the one task file: how to implement/continue a build phase), `ISSUES.md`, `.gitignore`. Initialized git (`main` branch), set commit identity (Tetiana Ronska / GitHub noreply email, confirmed with contributor), committed in three commits (`.gitattributes` alone first, then the scaffold, then `.gitignore`).
+
+**Environment finding — device-bridge git lock friction:** every git command run through the Cowork device bridge (`device_bash`) leaves a stale `.git/index.lock` (sometimes `.git/HEAD.lock`) behind, because the bridge can't delete files, only move them — the next git command then fails with `Unable to create '.git/index.lock': File exists` until the stale lock is moved aside. Confirmed the repo itself stays intact throughout (`git fsck` clean after each commit). Contributor chose to keep working through the bridge with this workaround rather than pause or switch to a native session. Documented in `CLAUDE.md`, `pomo-task-build-phase.md`, and `ISSUES.md` (open item) for future sessions; worth confirming whether it's a bridge-only issue the first time a native Claude Code session runs git in this repo.
+
+Superseded Session 1's dev-location decision (mirror-out-after-each-change via device bridge) — replaced with working directly in this repo as noted in Architectural decisions above.
+
+**Next:** begin Phase 1 (core activity-detection + Pomodoro timer + lock overlay) using `pomo-task-build-phase.md`.
 
 ### Session 1 — 2026-08-09
 
