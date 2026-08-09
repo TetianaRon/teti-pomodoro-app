@@ -92,10 +92,12 @@ expressible in terms of busy intervals alone. In particular:
 
 **Known limits of the rule, accepted:**
 
-- A genuine all-day offsite or workshop would look exactly like a holiday and
-  would cut the cap to 3 h. Free/busy data cannot distinguish them. The
-  consequence is bounded — Emergency Mode remains available — but a manual
-  override is worth considering in Phase 4.
+- A genuine all-day offsite or workshop looks exactly like a holiday and would
+  cut the cap to 3 h. Free/busy data cannot distinguish them. **Resolved by
+  the manual override below** (confirmed 2026-08-09). Worth noting the
+  practical impact is smaller than it sounds: during an all-day offsite you
+  are mostly in sessions rather than typing, and only keyboard/mouse activity
+  is tracked, so a 3 h cap may never bind on the day it misfires.
 - Holidays are only detectable once they are actually booked into the
   calendar. In the sample, everything through 2027-01-01 is booked and
   nothing after 2027-02-15 is, so the far future currently reads as ordinary
@@ -115,6 +117,44 @@ expressible in terms of busy intervals alone. In particular:
   back to the day-of-week rule alone — Sat/Sun reduced, everything else 11h —
   and surface that it is running without calendar data, rather than failing
   closed or silently granting a full cap on a holiday.
+### 5a. Manual day-type override
+
+Confirmed 2026-08-09. The calendar rule above is good but not perfect, so the
+day's classification can be corrected by hand from the tray menu. The two
+directions carry very different risk and are budgeted differently.
+
+| Direction | Effect | Limit |
+| --- | --- | --- |
+| **Treat today as a non-working day** | base cap 11 h → 3 h | **Unlimited.** Self-restricting, so there is nothing to abuse. Covers a sick day, or a holiday the calendar never got. |
+| **Treat today as a working day** | base cap 3 h → 11 h | **2 per calendar month.** |
+
+**Why the raise is capped.** It is a 3 h → 11 h jump in one click — far larger
+than Emergency Mode's +1 h. Left unlimited it would turn every weekend into an
+11 h day on demand, which would hollow out the rule §1 calls the whole point of
+the app: that the app, not in-the-moment willpower, holds the line. Two per
+month is enough for genuine offsites, which are rare, while being too few to
+become a habit.
+
+Rules:
+
+- **Today only.** An override expires at local midnight and cannot be set for
+  a future date. This matches the live-recalculation model in §7: you set it
+  in the moment you notice the app has the day wrong.
+- **Persisted**, so restarting the app does not clear an active override or
+  reset the monthly budget.
+- **The raise budget resets on the 1st** of each calendar month, and is
+  separate from Emergency Mode's 3 h weekly pool. The two stack: an overridden
+  11 h day can still be extended by Emergency Mode.
+- **A spent raise is not refunded** if the override is cleared later the same
+  day. Refunding it would make the budget meaningless — activate in the
+  morning, work the long day, clear it at night, repeat.
+- **The override wins over the calendar** for the rest of the day, even if the
+  feed changes underneath it.
+- **The walking formula still applies.** §7's shortfall is subtracted from
+  whichever base cap is in force, overridden or not.
+- Raising is allowed on any day, weekends included. The monthly budget is what
+  keeps that honest, rather than a rule about which days qualify.
+
 - **Effective cap:** the base cap, adjusted live by the walking shortfall described in §7 — see the formula there. This is the actual number of work-minutes the app will allow to start on a given day.
 - Once the effective cap is hit, the app stops starting new work sessions from activity — you're done for the day as far as the app is concerned (unless Emergency Mode is used).
 - **Emergency Mode:** the only way past the effective cap. Each activation grants **+1 hour**, stacking on top of whatever the effective cap is at that moment — forced breaks continue as normal during that extra hour; Emergency Mode is not a break-skip mechanism. Capped at **3 hours total per week** (so at most three activations, or any split adding up to 3h, per rolling week). No calendar or advance-scheduling requirement — a direct override, kept rare by the weekly cap rather than gated by a delay. If a genuinely extreme situation exceeds this budget, the intentional escape hatch is closing the app entirely — a deliberate act, not a casual one.
@@ -155,6 +195,7 @@ A simple local log (e.g. SQLite or a JSON/CSV log file), used both to drive the 
 - Breaks taken / skipped (which path, duration)
 - Emergency Mode activations (date, duration) — running weekly total
 - Focus Mode activations (date, duration) — running daily count
+- Day-type overrides (date, direction, and whether the calendar was overruled) — running monthly count of the capped "treat as working day" direction, per §5a. Also the cheapest way to find out whether the ≥6 h rule is misclassifying days in practice: a run of raises would say so.
 - Walking sessions (manual toggle, duration) vs the 60 min/day target
 - Daily total work time vs the base cap, and the live effective cap (base cap adjusted by walking shortfall, per §7)
 
@@ -184,7 +225,7 @@ Likely libraries:
   database, so `zoneinfo` raises `ZoneInfoNotFoundError` for
   `America/Toronto` without it. Needed for §5's day-boundary maths, and
   PyInstaller must bundle it for the packaged `.exe` in Phase 8.
-- `pystray` — system tray icon (status, manual controls: custom skip, Focus Mode, Emergency Mode, manual walking toggle)
+- `pystray` — system tray icon (status, manual controls: custom skip, Focus Mode, Emergency Mode, manual walking toggle, day-type override per §5a)
 - `sqlite3` (stdlib) — local history log
 - `PyInstaller` — packaging to `.exe`
 
