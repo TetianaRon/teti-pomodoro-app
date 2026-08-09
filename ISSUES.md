@@ -29,6 +29,22 @@ handful of practices it governs into `CLAUDE.md` and drop the hard-gate
 wording. Until one happens, every native session hits this wall on its
 first move.
 
+### 2026-08-09 — Git commit identity was never written to local config
+The Session 2 bridge run set the commit identity per-command rather than
+with `git config --local`, so the repo's local config was empty and
+Session 3's commits silently fell through to the global identity
+(`tetiana.ronska@laivly.com`). GitHub rejected the push with `GH007: Your
+push would publish a private email address` — after the commits were
+already made, not at commit time.
+
+Fixed by writing the identity to local config and re-authoring the two
+unpushed commits (`git rebase --exec 'git commit --amend --no-edit
+--reset-author'`). Local config now holds
+`113524945+TetianaRon@users.noreply.github.com`, so this shouldn't recur
+in this clone — but a fresh clone would hit it again, since local config
+isn't cloned. Worth checking `git config --local user.email` before the
+first commit in any new clone.
+
 ### 2026-08-09 — No Python interpreter on the dev machine
 Phase 1 was written before anyone noticed the machine had no Python — only
 the Microsoft Store alias stubs on `PATH`. Installed Python 3.12.10 via
