@@ -356,19 +356,37 @@ class WarningBanner:
         self._hovering = False
         self._schedule_poll()
 
-    def tick(self, remaining: float) -> None:
+    @property
+    def visible(self) -> bool:
+        return self._window is not None
+
+    def set_text(self, text: str) -> None:
+        """Change the message, keeping it anchored on screen."""
         if self._label is None or self._window is None:
             return
-        minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
         before = self._window.winfo_reqwidth()
-        self._label.configure(text=f"Break in {minutes}:{seconds:02d}")
+        self._label.configure(text=text)
         self._window.update_idletasks()
-        # Widths are stable for the usual M:SS values, but a longer
-        # warning_lead would widen the text — re-anchor rather than let the
-        # banner grow off the edge of the screen.
+        # Widths are stable for the usual M:SS values, but a longer message
+        # widens the text — re-anchor rather than let the banner grow off
+        # the edge of the screen.
         if self._window.winfo_reqwidth() != before:
             self._reposition()
         self._window.attributes("-topmost", True)
+
+    def tick(self, remaining: float) -> None:
+        minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
+        self.set_text(f"Break in {minutes}:{seconds:02d}")
+
+    def notice(self, text: str) -> None:
+        """Show a standing message rather than a countdown.
+
+        Used for the stuck-device warning (SPEC §3), which would otherwise
+        only reach a console nobody is looking at.
+        """
+        if self._window is None:
+            self.show()
+        self.set_text(text)
 
     def hide(self) -> None:
         if self._poll_job is not None:

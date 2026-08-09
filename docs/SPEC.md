@@ -67,13 +67,26 @@ idle time is measured from that moment rather than from the last keystroke:
 without that, a two-hour meeting you barely typed in would look like an
 absence and discard the session the instant it ended.
 
-**Known limitation, accepted.** Any app holding the microphone open — a
-conferencing tool that never releases it, a recording app left running —
-silently switches break enforcement off. The app warns in its log after
-`Config.exclusion_warn_after` (2h) of continuous exclusion but does not
-override it, because overriding would mean locking the screen during what
-might be a genuine call. `--exclusions` reports what is currently holding
-breaks off, and `--no-exclusions` disables the mechanism entirely.
+**Known limitation, accepted (confirmed 2026-08-09).** Any app holding the
+microphone open — a conferencing tool that never releases it, a recording app
+left running — silently switches break enforcement off. After
+`Config.exclusion_warn_after` (2h) of exclusion the app shows a standing
+corner banner naming what is holding the device, and logs the same. It does
+**not** override the exclusion: calls are never interrupted, so a stuck device
+is reported rather than overruled. Locking the screen during what might be a
+genuine call is the one failure these exclusions exist to prevent.
+
+Two things worth being explicit about, because they are easy to misread:
+
+- **The 2h is one *continuous* stretch, not a daily total.** Any gap where
+  nothing holds the camera or mic resets it. Ordinary back-to-back meetings,
+  where each call releases the device on hang-up, will never trigger it.
+- **On a heavy meeting day the app does almost nothing**, by design. Breaks
+  do not accumulate, and none is owed when the calls end — the countdown
+  simply resumes where it froze.
+
+`--exclusions` reports what is currently holding breaks off; `--no-exclusions`
+disables the mechanism entirely.
 
 ## 4. Break-skip system
 

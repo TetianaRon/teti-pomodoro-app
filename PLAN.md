@@ -158,7 +158,11 @@ Three engine subtleties, each with a test:
 
 **Verification so far:** the parser was checked against this machine's real ConsentStore, which had history for Slack, Chrome, Zoom, Loom, the Camera app and Premiere — exercising both the packaged and `#`-encoded desktop key formats. That proves the reading and name-decoding are right, but every recorded entry had a non-zero stop time, so the **live** case (`LastUsedTimeStop = 0`) is still unproven. Needs a real call or the Camera app open, then `--exclusions`.
 
-**Accepted limitation:** an app that holds the microphone open silently disables break enforcement. The log warns after 2h of continuous exclusion but does not override it — overriding would mean locking the screen during what might be a genuine call.
+**Accepted limitation:** an app that holds the microphone open silently disables break enforcement. After 2h of continuous exclusion the app now shows a standing corner banner naming what is holding the device, but does not override it — overriding would mean locking the screen during what might be a genuine call, the exact failure exclusions exist to prevent. Contributor confirmed calls should never be interrupted, so a stuck device is reported rather than overruled.
+
+**Banner handling is now state-driven, not event-driven** — and that fixed a bug introduced earlier the same session. Hiding the banner on `EXCLUSION_STARTED` meant that if a call began during the 2-minute warning and ended while the warning was still running, the banner never came back. `_update_banner()` now decides from the current state each tick, so there is no transition to miss. The banner also grew a general `set_text()`/`notice()` API; verified it re-anchors correctly as the message widens, from 164px up to 733px, staying inside the primary monitor.
+
+**Worth stating plainly, since it is easy to misread:** the 2h warning measures one *continuous* stretch, not a daily total — ordinary back-to-back meetings each start fresh and will never trigger it. And on a heavy meeting day the app does almost nothing by design: breaks do not accumulate, and none is owed when the calls end.
 
 ### Session 2 — 2026-08-09
 

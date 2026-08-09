@@ -86,14 +86,13 @@ class Application:
             now, self.monitor.last_input_at, excluded=exclusion.active
         )
         snapshot = self.engine.snapshot()
-        self._watch_long_exclusion(now, exclusion.active)
+        notice = self._watch_long_exclusion(now, exclusion.active)
 
         for event in events:
             self._handle(event, snapshot)
 
-        if snapshot.state is State.WARNING:
-            self.banner.tick(snapshot.remaining)
-        elif snapshot.state is State.BREAK and self.overlay.visible:
+        self._update_banner(snapshot, exclusion, notice)
+        if snapshot.state is State.BREAK and self.overlay.visible:
             self.overlay.tick(snapshot.remaining)
 
         # The safety hold tears the window down without ending the break;
@@ -122,9 +121,6 @@ class Application:
             self._log("long-break cycle count reset")
         elif event is Event.EXCLUSION_STARTED:
             self._log(f"holding off — {self._exclusion.describe()}")
-            # A call arriving during the warning means the lock isn't
-            # imminent any more; leaving the banner up would be a lie.
-            self.banner.hide()
         elif event is Event.EXCLUSION_ENDED:
             self._log("clear again — countdown resumes")
         elif event is Event.WARNING_STARTED:
@@ -147,30 +143,57 @@ class Application:
             )
             self.overlay.release()
 
-    def _watch_long_exclusion(self, now: float, excluded: bool) -> None:
-        """Say something if breaks have been held off for an implausibly long time.
+    def _update_banner(self, snapshot, exclusion, notice: str | None) -> None:
+        """Decide what the corner banner shows, from state rather than events.
+
+        Driven by the current state each tick instead of by transitions: an
+        earlier event-driven version hid the banner when a call started and
+        had no way to bring it back if the call ended while the warning was
+        still running.
+        """
+        if self.dry_run:
+            return
+        if notice is not None:
+            self.banner.notice(notice)
+        elif snapshot.state is State.WARNING and not exclusion.active:
+            if not self.banner.visible:
+                self.banner.show()
+            self.banner.tick(snapshot.remaining)
+        elif self.banner.visible:
+            self.banner.hide()
+
+    def _watch_long_exclusion(self, now: float, excluded: bool) -> str | None:
+        """Warn if breaks have been held off for an implausibly long time.
 
         A stuck microphone — a conferencing app that never releases it, a
         recording tool left running — would otherwise silently switch break
         enforcement off for the rest of the day. This only warns: the
         exclusion still stands, because overriding it would mean locking
         the screen during what might be a genuine call.
+
+        Note this measures one *continuous* stretch. Two calls with any gap
+        between them each start fresh, so ordinary back-to-back meetings
+        will not trigger it.
         """
         if not excluded:
             self._excluded_since = None
             self._warned_long_exclusion = False
-            return
+            return None
         if self._excluded_since is None:
             self._excluded_since = now
-            return
+            return None
+
         held = now - self._excluded_since
-        if held >= self.config.exclusion_warn_after and not self._warned_long_exclusion:
+        if held < self.config.exclusion_warn_after:
+            return None
+        if not self._warned_long_exclusion:
             self._warned_long_exclusion = True
             self._log(
                 f"note: breaks held off for {held / 3600:.1f}h by "
                 f"{self._exclusion.describe()} — if that looks wrong, some app "
                 f"is holding the device open"
             )
+        return f"No breaks for {held / 3600:.0f}h — {self._exclusion.describe()}"
 
     def _log(self, message: str) -> None:
         print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
