@@ -45,6 +45,7 @@ class InputSuppressor:
         self._max_seconds = max_seconds
         self._listeners: list = []
         self._escape_down_at: float | None = None
+        self._escape_timer: threading.Timer | None = None
         self._lock = threading.Lock()
         self._fired = False
         self._stopped = threading.Event()
@@ -100,6 +101,10 @@ class InputSuppressor:
 
     def stop(self) -> None:
         self._stopped.set()   # stands the watchdog down
+        with self._lock:
+            timer, self._escape_timer = self._escape_timer, None
+        if timer is not None:
+            timer.cancel()
         for listener in self._listeners:
             try:
                 listener.stop()
@@ -129,19 +134,39 @@ class InputSuppressor:
 
         if self._on_safety_hold is None or key != self._escape_key:
             return
+
+        # Timed from a real timer rather than counted from repeat events.
+        # The previous version recorded the first press and waited for
+        # auto-repeat to tell it how long the key had been down, so a
+        # keyboard that doesn't repeat Escape produced exactly one event
+        # and the hold could never fire at all.
         with self._lock:
-            if self._escape_down_at is None:
-                self._escape_down_at = time.monotonic()
+            if self._escape_timer is not None or self._fired:
                 return
-            held = time.monotonic() - self._escape_down_at
-            if held >= self._hold_seconds and not self._fired:
-                self._fired = True
-                self._on_safety_hold()
+            self._escape_down_at = time.monotonic()
+            timer = threading.Timer(self._hold_seconds, self._hold_elapsed)
+            timer.daemon = True
+            self._escape_timer = timer
+        timer.start()
+
+    def _hold_elapsed(self) -> None:
+        """Escape stayed down for the full duration."""
+        with self._lock:
+            if self._fired or self._escape_timer is None:
+                return
+            self._fired = True
+        if self._on_safety_hold is not None:
+            self._on_safety_hold()
 
     def _on_release(self, key) -> None:
-        if key == self._escape_key:
-            with self._lock:
-                self._escape_down_at = None
+        if key != self._escape_key:
+            return
+        with self._lock:
+            timer, self._escape_timer = self._escape_timer, None
+            self._escape_down_at = None
+            self._fired = False
+        if timer is not None:
+            timer.cancel()
 
 
 def monitor_rects(root: tk.Tk) -> list[tuple[int, int, int, int]]:
