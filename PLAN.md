@@ -42,7 +42,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Open items
 
-*(none — every open item raised so far has been resolved.)*
+- **Whether muting in native Zoom or Slack releases the microphone.** Not testable when Phase 2 was built; deferred by the contributor. The *detection mechanism* is already known to cover both — `Zoom.exe` and `91750D7E.Slack` appear in this machine's ConsentStore history, in the same two key formats the code was verified against — so nothing app-specific is at stake. The only question is whether their mute button releases the device or merely stops transmitting. Meet keeps it (measured), and that is the standard pattern. **If one of them releases it, the symptom is the screen locking during a muted call.** Mitigations already exist: Phase 3's calendar meeting-skip covers any *scheduled* call regardless of devices, the hold-Escape skip covers the moment, and `--no-exclusions` disables the mechanism outright. Check with `--exclusions` next time either is in use.
 
 ### Resolved
 
