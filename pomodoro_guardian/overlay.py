@@ -279,8 +279,9 @@ class WarningBanner:
     A small always-on-top toast in the corner of the primary monitor. It
     must not steal focus or block anything — the whole point is letting you
     wrap up first — so it is made **click-through**: every click passes
-    straight to whatever is underneath, and it sits at a low opacity until
-    the cursor moves over it.
+    straight to whatever is underneath. It stays clearly readable by
+    default and *fades* when the cursor moves over it, so you can see what
+    it is covering at the moment you reach for it.
 
     Because a click-through window receives no mouse events, `<Enter>` and
     `<Leave>` never fire on it. Hover is therefore detected by polling the
@@ -306,22 +307,25 @@ class WarningBanner:
         window.attributes("-topmost", True)
         window.configure(bg=self.BG)
 
+        # Seeded with representative text, not "": the window is measured to
+        # place it, and an empty label measures as bare padding. Positioning
+        # off that width put the banner's right edge past the monitor and
+        # spilled it onto the next screen once the real text arrived.
         self._label = tk.Label(
-            window, text="", font=("Segoe UI", 14, "bold"),
+            window, text="Break in 0:00", font=("Segoe UI", 14, "bold"),
             bg=self.BG, fg=self.FG, padx=22, pady=14,
         )
         self._label.pack()
 
+        # Assigned before positioning: _reposition() reads self._window and
+        # would silently do nothing if this came later.
+        self._window = window
         window.update_idletasks()
-        margin = 24
-        left, top, width, _height = primary_rect(self._root)
-        x = left + width - window.winfo_reqwidth() - margin
-        window.geometry(f"+{x}+{top + margin}")
+        self._reposition()
 
         # -alpha must be set before WS_EX_TRANSPARENT is added: setting it is
         # what makes the window layered in the first place.
         window.attributes("-alpha", self._config.banner_alpha)
-        self._window = window
         self._make_click_through(window)
         self._hovering = False
         self._schedule_poll()
@@ -330,7 +334,14 @@ class WarningBanner:
         if self._label is None or self._window is None:
             return
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
+        before = self._window.winfo_reqwidth()
         self._label.configure(text=f"Break in {minutes}:{seconds:02d}")
+        self._window.update_idletasks()
+        # Widths are stable for the usual M:SS values, but a longer
+        # warning_lead would widen the text — re-anchor rather than let the
+        # banner grow off the edge of the screen.
+        if self._window.winfo_reqwidth() != before:
+            self._reposition()
         self._window.attributes("-topmost", True)
 
     def hide(self) -> None:
@@ -343,6 +354,15 @@ class WarningBanner:
         self._label = None
 
     # -- internals ----------------------------------------------------
+
+    def _reposition(self) -> None:
+        """Anchor to the top-right of the primary monitor, fully on-screen."""
+        if self._window is None:
+            return
+        margin = 24
+        left, top, width, _height = primary_rect(self._root)
+        x = left + width - self._window.winfo_reqwidth() - margin
+        self._window.geometry(f"+{x}+{top + margin}")
 
     @staticmethod
     def _make_click_through(window: tk.Toplevel) -> None:
@@ -374,7 +394,7 @@ class WarningBanner:
         )
 
     def _poll_hover(self) -> None:
-        """Raise opacity while the cursor is over the banner."""
+        """Fade the banner while the cursor is over it."""
         if self._window is None:
             return
         try:

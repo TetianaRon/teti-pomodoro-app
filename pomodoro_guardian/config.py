@@ -27,12 +27,14 @@ class Config:
     # How long before the lock the warning appears, so you can wrap up.
     warning_lead: float = 2 * MINUTE
 
-    # The warning banner is click-through, so it can never block anything —
-    # it just sits faintly over whatever is underneath until you look at it.
+    # The warning banner is click-through, so it can never block anything.
+    # It stays clearly readable by default — it has two minutes to be
+    # noticed, and a warning nobody sees is useless — then fades as the
+    # cursor approaches, so you can see whatever it is sitting over.
     # Hover is detected by polling the cursor, since a click-through window
     # receives no mouse events of its own.
-    banner_alpha: float = 0.15
-    banner_alpha_hover: float = 0.90
+    banner_alpha: float = 0.90
+    banner_alpha_hover: float = 0.15
     banner_hover_poll: float = 0.12
 
     # --- Detection (SPEC §2.1) ---
