@@ -276,18 +276,27 @@ class LockOverlay:
 class WarningBanner:
     """The 2-minute heads-up before the lock (SPEC §2.3).
 
-    A small always-on-top toast in the corner of the primary monitor — it
-    must not steal focus or block anything, since the whole point is
-    letting you wrap up first.
+    A small always-on-top toast in the corner of the primary monitor. It
+    must not steal focus or block anything — the whole point is letting you
+    wrap up first — so it is made **click-through**: every click passes
+    straight to whatever is underneath, and it sits at a low opacity until
+    the cursor moves over it.
+
+    Because a click-through window receives no mouse events, `<Enter>` and
+    `<Leave>` never fire on it. Hover is therefore detected by polling the
+    global cursor position against the banner's rectangle.
     """
 
     BG = "#2b2113"
     FG = "#ffd8a8"
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
         self._root = root
+        self._config = config
         self._window: tk.Toplevel | None = None
         self._label: tk.Label | None = None
+        self._poll_job: str | None = None
+        self._hovering = False
 
     def show(self) -> None:
         if self._window is not None:
@@ -308,7 +317,14 @@ class WarningBanner:
         left, top, width, _height = primary_rect(self._root)
         x = left + width - window.winfo_reqwidth() - margin
         window.geometry(f"+{x}+{top + margin}")
+
+        # -alpha must be set before WS_EX_TRANSPARENT is added: setting it is
+        # what makes the window layered in the first place.
+        window.attributes("-alpha", self._config.banner_alpha)
         self._window = window
+        self._make_click_through(window)
+        self._hovering = False
+        self._schedule_poll()
 
     def tick(self, remaining: float) -> None:
         if self._label is None or self._window is None:
@@ -318,7 +334,67 @@ class WarningBanner:
         self._window.attributes("-topmost", True)
 
     def hide(self) -> None:
+        if self._poll_job is not None:
+            self._root.after_cancel(self._poll_job)
+            self._poll_job = None
         if self._window is not None:
             self._window.destroy()
             self._window = None
         self._label = None
+
+    # -- internals ----------------------------------------------------
+
+    @staticmethod
+    def _make_click_through(window: tk.Toplevel) -> None:
+        """Pass every click through to whatever is underneath.
+
+        Degrades to a normal (still translucent) window if pywin32 is
+        missing — the banner blocking a small area is a far smaller problem
+        than it failing to appear.
+        """
+        try:
+            import win32con
+            import win32gui
+        except ImportError:
+            return
+        hwnd = win32gui.GetParent(window.winfo_id()) or window.winfo_id()
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        win32gui.SetWindowLong(
+            hwnd,
+            win32con.GWL_EXSTYLE,
+            style
+            | win32con.WS_EX_LAYERED       # already set by -alpha; harmless
+            | win32con.WS_EX_TRANSPARENT   # the click-through part
+            | win32con.WS_EX_NOACTIVATE,   # never steal focus
+        )
+
+    def _schedule_poll(self) -> None:
+        self._poll_job = self._root.after(
+            int(self._config.banner_hover_poll * 1000), self._poll_hover
+        )
+
+    def _poll_hover(self) -> None:
+        """Raise opacity while the cursor is over the banner."""
+        if self._window is None:
+            return
+        try:
+            import win32api
+
+            x, y = win32api.GetCursorPos()
+            wx, wy = self._window.winfo_rootx(), self._window.winfo_rooty()
+            over = (
+                wx <= x < wx + self._window.winfo_width()
+                and wy <= y < wy + self._window.winfo_height()
+            )
+        except (ImportError, tk.TclError):
+            over = False
+
+        if over != self._hovering:
+            self._hovering = over
+            self._window.attributes(
+                "-alpha",
+                self._config.banner_alpha_hover
+                if over
+                else self._config.banner_alpha,
+            )
+        self._schedule_poll()

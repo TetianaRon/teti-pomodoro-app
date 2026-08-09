@@ -27,6 +27,14 @@ class Config:
     # How long before the lock the warning appears, so you can wrap up.
     warning_lead: float = 2 * MINUTE
 
+    # The warning banner is click-through, so it can never block anything —
+    # it just sits faintly over whatever is underneath until you look at it.
+    # Hover is detected by polling the cursor, since a click-through window
+    # receives no mouse events of its own.
+    banner_alpha: float = 0.15
+    banner_alpha_hover: float = 0.90
+    banner_hover_poll: float = 0.12
+
     # --- Detection (SPEC §2.1) ---
     # Input is "active" if the last keystroke/click was this recent. Bridges
     # the ordinary gaps in real typing so reading a paragraph mid-sentence

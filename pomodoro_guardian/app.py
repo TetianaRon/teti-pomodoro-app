@@ -35,7 +35,7 @@ class Application:
         self._root.withdraw()  # the controller window is never shown
         self._root.title("Pomodoro Guardian")
         self.overlay = LockOverlay(self._root, config)
-        self.banner = WarningBanner(self._root)
+        self.banner = WarningBanner(self._root, config)
 
     def run(self) -> None:
         self.monitor.start()
