@@ -36,11 +36,13 @@ class CalendarWatcher:
         refresh_seconds: float = REFRESH_SECONDS,
         max_age_seconds: float = MAX_AGE_SECONDS,
         day_off_hours: float = 6.0,
+        meeting_lead: float = 0.0,
     ) -> None:
         self._url = url
         self._refresh = refresh_seconds
         self._max_age = max_age_seconds
         self._day_off_hours = day_off_hours
+        self._meeting_lead = meeting_lead
 
         self._lock = threading.Lock()
         self._schedule: Schedule | None = None
@@ -98,7 +100,9 @@ class CalendarWatcher:
             return None
         if time.monotonic() - fetched_at > self._max_age:
             return None  # too old to trust; enforce breaks normally
-        return schedule.meeting_at(moment, self._day_off_hours)
+        return schedule.meeting_at(
+            moment, self._day_off_hours, self._meeting_lead
+        )
 
     @property
     def configured(self) -> bool:

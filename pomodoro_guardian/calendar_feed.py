@@ -15,7 +15,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 USER_AGENT = "PomodoroGuardian/0.1 (+local personal use)"
 DEFAULT_TIMEOUT = 15.0
@@ -197,9 +197,17 @@ class Schedule:
         return cls(tuple(blocks), _property(lines, "X-WR-TIMEZONE"))
 
     def meeting_at(
-        self, when: datetime, day_off_hours: float = 6.0
+        self,
+        when: datetime,
+        day_off_hours: float = 6.0,
+        lead_seconds: float = 0.0,
     ) -> BusyBlock | None:
         """The meeting covering `when`, if there is one.
+
+        `lead_seconds` extends each meeting backwards so breaks are held off
+        before it starts as well as during it — a lock landing three minutes
+        before a call is worse than one during it, because there is no time
+        to prepare and no way to get it back.
 
         Blocks at least `day_off_hours` long are **not** meetings — they are
         how a holiday or vacation appears in a free/busy feed (SPEC §5). Left
@@ -210,10 +218,11 @@ class Schedule:
         Where meetings overlap, the one ending latest wins, so back-to-back
         or double-booked slots suppress breaks until the last one finishes.
         """
+        lead = timedelta(seconds=max(0.0, lead_seconds))
         covering = [
             b
             for b in self.blocks
-            if b.start <= when < b.end and b.hours < day_off_hours
+            if b.start - lead <= when < b.end and b.hours < day_off_hours
         ]
         return max(covering, key=lambda b: b.end) if covering else None
 

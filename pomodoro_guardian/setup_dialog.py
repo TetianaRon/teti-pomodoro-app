@@ -57,6 +57,8 @@ class SetupDialog:
         c = settings.config
         self._vars = {
             "calendar_url": tk.StringVar(value=settings.calendar_url or ""),
+            "meeting_lead": tk.StringVar(
+                value=_num(settings.meeting_lead_minutes)),
             "work": tk.StringVar(value=_mins(c.work_duration)),
             "short_break": tk.StringVar(value=_mins(c.short_break_duration)),
             "long_break": tk.StringVar(value=_mins(c.long_break_duration)),
@@ -119,6 +121,11 @@ class SetupDialog:
                                       justify="left")
         self._feed_status.grid(row=2, column=0, columnspan=2, sticky="w",
                                pady=(6, 0))
+
+        lead = ttk.Frame(frame)
+        lead.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        _field(lead, 0, "Hold breaks before a meeting",
+               self._vars["meeting_lead"], "minutes", "time to prepare")
         frame.columnconfigure(0, weight=1)
 
     def _build_rhythm(self, parent, row):
@@ -202,6 +209,8 @@ class SetupDialog:
                 self._vars["raises"], "Day-type overrides", allow_zero=True))
             walking = _positive(
                 self._vars["walking"], "Walking target", allow_zero=True)
+            meeting_lead = _positive(
+                self._vars["meeting_lead"], "Meeting lead", allow_zero=True)
         except ValueError as exc:
             self._error.configure(text=str(exc))
             return
@@ -226,6 +235,7 @@ class SetupDialog:
             self._start,
             config=config,
             calendar_url=url,
+            meeting_lead_minutes=meeting_lead,
             working_day_cap_hours=working_cap,
             non_working_day_cap_hours=day_off_cap,
             emergency_hours_per_week=emergency,

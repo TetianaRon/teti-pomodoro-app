@@ -73,6 +73,42 @@ def test_a_long_but_sub_threshold_meeting_still_counts():
     assert schedule.meeting_at(at(12), day_off_hours=6.0) is not None
 
 
+def test_breaks_are_held_off_before_a_meeting_starts():
+    """Prep time: a lock landing minutes before a call is worse than one
+    during it — there is no time to get ready and no way to get it back."""
+    schedule = Schedule((block(9, 10),))
+    lead = 10 * 60
+
+    assert schedule.meeting_at(at(8.9), lead_seconds=lead) is not None   # 6 min before
+    assert schedule.meeting_at(at(8.75), lead_seconds=lead) is None      # 15 min before
+
+
+def test_the_lead_window_starts_exactly_on_time():
+    schedule = Schedule((block(9, 10),))
+    lead = 10 * 60
+
+    assert schedule.meeting_at(at(9 - 10 / 60), lead_seconds=lead) is not None
+    assert schedule.meeting_at(at(9 - 11 / 60), lead_seconds=lead) is None
+
+
+def test_no_lead_means_no_early_suppression():
+    schedule = Schedule((block(9, 10),))
+    assert schedule.meeting_at(at(8.9), lead_seconds=0) is None
+
+
+def test_the_lead_does_not_resurrect_a_day_off_block():
+    """A vacation is still not a meeting, however early you look."""
+    schedule = Schedule((block(9, 18),))
+    assert schedule.meeting_at(
+        at(8.9), day_off_hours=6.0, lead_seconds=10 * 60
+    ) is None
+
+
+def test_the_lead_does_not_extend_past_the_end():
+    schedule = Schedule((block(9, 10),))
+    assert schedule.meeting_at(at(10.01), lead_seconds=10 * 60) is None
+
+
 def test_overlapping_meetings_suppress_until_the_last_one_ends():
     """Double-booked slots must not un-suppress at the first end time."""
     schedule = Schedule((block(9, 10), block(9.5, 11)))
@@ -131,11 +167,28 @@ class StubWatcher:
         return self.meeting
 
 
-def test_meeting_detector_excludes_and_says_when_it_ends():
-    result = MeetingDetector(StubWatcher(block(9, 10))).check()
+def relative(start_minutes: float, end_minutes: float) -> BusyBlock:
+    """A block positioned against the real clock, which the detector reads."""
+    now = datetime.now(UTC)
+    return BusyBlock(
+        now + timedelta(minutes=start_minutes),
+        now + timedelta(minutes=end_minutes),
+    )
+
+
+def test_meeting_detector_says_when_a_meeting_in_progress_ends():
+    result = MeetingDetector(StubWatcher(relative(-5, 25))).check()
 
     assert result.reasons == (Reason.MEETING,)
     assert "until" in result.describe()
+
+
+def test_meeting_detector_says_when_an_imminent_meeting_starts():
+    """During the lead window, "until 20:00" would misdescribe the reason."""
+    result = MeetingDetector(StubWatcher(relative(5, 35))).check()
+
+    assert result.reasons == (Reason.MEETING,)
+    assert "starting" in result.describe()
 
 
 def test_meeting_detector_is_clear_with_no_meeting():

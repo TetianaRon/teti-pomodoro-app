@@ -118,8 +118,15 @@ class MeetingDetector:
         meeting = self._watcher.meeting_now()
         if meeting is None:
             return Exclusion()
-        ends = meeting.end.astimezone().strftime("%H:%M")
-        return Exclusion((Reason.MEETING,), f"until {ends}")
+        from datetime import datetime, timezone
+
+        starts = meeting.start.astimezone()
+        ends = meeting.end.astimezone()
+        if datetime.now(timezone.utc) < meeting.start:
+            # In the lead window rather than the meeting itself — saying
+            # "until 20:00" here would misdescribe why breaks are held.
+            return Exclusion((Reason.MEETING,), f"starting {starts:%H:%M}")
+        return Exclusion((Reason.MEETING,), f"until {ends:%H:%M}")
 
 
 class FakeDetector:

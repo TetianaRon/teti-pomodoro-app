@@ -333,7 +333,9 @@ def report_exclusions(config: Config, settings) -> int:
     print(f"  presenting        : {presenting_now()}")
 
     watcher = CalendarWatcher(
-        settings.calendar_url, day_off_hours=settings.day_off_block_hours
+        settings.calendar_url,
+        day_off_hours=settings.day_off_block_hours,
+        meeting_lead=settings.meeting_lead_minutes * 60,
     )
     meeting = None
     if watcher.configured:
@@ -404,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
     watcher = CalendarWatcher(
         None if args.no_exclusions else settings.calendar_url,
         day_off_hours=settings.day_off_block_hours,
+        meeting_lead=settings.meeting_lead_minutes * 60,
     )
     app = Application(
         config=config,

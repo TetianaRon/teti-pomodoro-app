@@ -136,6 +136,16 @@ Two distinct skip paths, both self-serve, no "prove it" friction:
 **A. Meeting skip (calendar-based) — unlimited.**
 If Google Calendar shows a meeting in progress at the moment a break would trigger, the break is suppressed for the meeting's duration automatically. No cap — trust-based and unlimited.
 
+**Breaks are held off for 10 minutes *before* a meeting as well (added 2026-08-09.)** A lock landing three minutes before a call is worse than one during it: there is no time to prepare, and no way to get the time back. `Settings.meeting_lead_minutes`, configurable in the setup window. The lead does not resurrect a day-off block — a vacation is still not a meeting however early you look — and it does not extend past a meeting's end.
+
+**Verified live 2026-08-09** against a placeholder event, through the real
+`CalendarWatcher` → `MeetingDetector` → `CombinedDetector` chain. The lead
+window fired before the meeting began, and the message distinguishes the two
+states ("starting 19:05" versus "until 20:05") rather than misdescribing a
+pre-meeting hold as the meeting itself. Google's `basic.ics` published the new
+event within a couple of minutes, so feed lag is not the obstacle it was
+expected to be.
+
 **B. Custom skip — capped.**
 A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 minutes. All custom skips share one **60-minutes-per-day accumulated cap**. Once the daily 60 minutes are used, no more custom skips are available that day — the lock enforces normally.
 

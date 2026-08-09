@@ -53,6 +53,10 @@ class Settings:
     # A contiguous busy block at least this long marks a non-working day.
     # Measured: ordinary weekdays never exceed 1.5h, holidays run 8.5-12.5h.
     day_off_block_hours: float = 6.0
+    # Breaks are held off this long *before* a meeting as well as during it,
+    # leaving room to prepare. A lock landing three minutes before a call is
+    # worse than one during it: no time to get ready, and no way back.
+    meeting_lead_minutes: float = 10.0
     emergency_hours_per_week: float = 3.0
     override_raises_per_month: int = 2
 
@@ -93,6 +97,7 @@ class Settings:
                 "working_day_hours": self.working_day_cap_hours,
                 "non_working_day_hours": self.non_working_day_cap_hours,
                 "day_off_block_hours": self.day_off_block_hours,
+                "meeting_lead_minutes": self.meeting_lead_minutes,
                 "emergency_hours_per_week": self.emergency_hours_per_week,
                 "override_raises_per_month": self.override_raises_per_month,
             },
@@ -159,6 +164,8 @@ class Settings:
                 caps, "non_working_day_hours", base.non_working_day_cap_hours),
             day_off_block_hours=_num(
                 caps, "day_off_block_hours", base.day_off_block_hours),
+            meeting_lead_minutes=_num(
+                caps, "meeting_lead_minutes", base.meeting_lead_minutes),
             emergency_hours_per_week=_num(
                 caps, "emergency_hours_per_week", base.emergency_hours_per_week),
             override_raises_per_month=int(_num(
