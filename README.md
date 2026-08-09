@@ -1,6 +1,6 @@
 # Pomodoro Guardian
 
-*Working title only — rename anytime.*
+*Name confirmed 2026-08-09 — no longer a placeholder.*
 
 A personal Windows desktop app that auto-detects active work and enforces
 Pomodoro-style breaks with a real full-screen, input-blocking lock — not a

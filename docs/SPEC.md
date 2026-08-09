@@ -1,6 +1,6 @@
 # Pomodoro Guardian — App Design Spec (v2)
 
-*Working title only — rename anytime. Windows desktop app.*
+*Windows desktop app. Name confirmed 2026-08-09 — no longer a placeholder.*
 
 ## 1. Problem this solves
 
@@ -235,7 +235,7 @@ Likely libraries:
 - ~~Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool.~~ **Both confirmed 2026-08-09**, and non-working days extended to cover holidays and vacations via the work calendar — see §5.
 - **New (2026-08-09):** how a full-day busy block actually renders in the shared free/busy feed — one interval per vacation day or one spanning the whole stretch, and which timezone the day boundaries fall in. Needs checking against real data at the start of Phase 3; §5's day-off rule depends on it.
 - ~~Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.~~ **Resolved 2026-08-09 — resets after an idle gap** (`Config.idle_reset_after`, default 60 min). Chosen over a fixed daily reset because it matches the auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset carries a count across a long lunch and resets one mid-evening. Implemented in Phase 1.
-- App name/branding (currently just a placeholder).
+- ~~App name/branding.~~ **Resolved 2026-08-09: Pomodoro Guardian**, kept after briefly considering the shorter "Pomo". The `pomo` abbreviation stays as the project/file prefix (`pomo-task-build-phase.md`); it is a shorthand, not the app's name.
 - First-run setup flow. Likely much smaller than first assumed: if the free/busy iCal URL works (see §9), setup is pasting one URL rather than an OAuth consent flow.
 
 ## 11. Suggested build order

@@ -39,12 +39,12 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Open items
 
-- App name/branding.
 - First-run setup flow. Now just pasting the secret iCal URL — see the calendar-access decision below.
 - Whether to keep `Config.safety_unlock` (hold Escape to release the lock) on. Currently on — see Architectural decisions.
 
 ### Resolved
 
+- ~~App name/branding~~ — **resolved 2026-08-09: Pomodoro Guardian.** Briefly renamed to "Pomo" and reverted; the contributor preferred the original. `pomo` remains the project/file prefix, as a shorthand rather than the app's name.
 - ~~Exact daily work cap~~ — **resolved 2026-08-09: 11h** on working days, 3h on non-working days. Config values, not hardcoded.
 - ~~"Weekend" = Saturday + Sunday?~~ — **confirmed 2026-08-09**, and extended: non-working days now also cover company holidays and vacations, read from the work calendar. See the calendar-access decision below.
 - ~~Emergency Mode's 3h/week budget split?~~ — **resolved 2026-08-09: one shared pool** across all 7 days.
