@@ -15,6 +15,18 @@ You work long, unbroken stretches — including late evenings and nights — at 
    - At zero, a full-screen, always-on-top, input-blocking overlay locks the screen for the break duration. This is a real block, not a reminder — closing/alt-tabbing away is not an escape hatch (see §6 for the one exception).
 4. **Idle handling.** If you stop producing input (step away without triggering a break), the work session pauses; it does not silently keep counting toward your daily cap while you're not there.
 
+**Thresholds as built (Phase 1, all in `pomodoro_guardian/config.py`):**
+
+| Setting | Default | What it governs |
+| --- | --- | --- |
+| `input_gap` | 30 s | How long a pause in typing still counts as "at the desk". Bridged gaps are credited as work once you resume; silence beyond this never is. |
+| `start_threshold` | 1 min | Span of sustained input needed to auto-start a session. Measured between first and last keystroke, so the grace period above can't satisfy it on its own. |
+| `warning_lead` | 2 min | How far ahead of the lock the warning appears. |
+| `idle_pause_after` | 2 min | When the session is shown as paused. Accrual has already stopped at the last keystroke; this is the user-visible signal. |
+| `idle_reset_after` | 60 min | When the part-finished interval is discarded and the long-break cycle count resets. |
+
+The lock blocks keyboard and mouse but deliberately **not Ctrl+Alt+Del** — blocking the Secure Attention Sequence needs a kernel driver. It stays as the last-resort exit, alongside closing the app (SPEC §5's intentional escape hatch). A `safety_unlock` setting additionally releases the lock on a 3-second Escape hold; it is on by default while the lock is new code and is expected to be turned off once proven.
+
 ## 3. Never-interrupt exclusions
 
 The lock will not trigger — and an in-progress countdown pauses — while:
@@ -99,7 +111,7 @@ Likely libraries:
 
 - Exact weekday cap value: 10h vs 11h — will be a config value rather than hardcoded; default to 10.5h unless you'd rather pick one now. Weekend cap is fixed at 3h/day.
 - Assuming "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one shared pool across all 7 days rather than split by weekday/weekend.
-- Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.
+- ~~Whether "long break every 4th cycle" resets at a fixed time (e.g. midnight) or after any idle gap.~~ **Resolved 2026-08-09 — resets after an idle gap** (`Config.idle_reset_after`, default 60 min). Chosen over a fixed daily reset because it matches the auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset carries a count across a long lunch and resets one mid-evening. Implemented in Phase 1.
 - App name/branding (currently just a placeholder).
 - First-run setup flow: Google Calendar OAuth consent.
 

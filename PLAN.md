@@ -6,7 +6,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Phases
 
-1. ⏳ Core loop: activity detection → Pomodoro timer → full-screen lock overlay
+1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
 2. ⏳ Exclusions: video call / screen share detection
 3. ⏳ Break-skip system (calendar meeting skip + capped custom skip)
 4. ⏳ Daily work cap + Emergency Mode
@@ -24,16 +24,55 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 - **Walking/standing-desk detection:** manual toggle only. Tapo-camera-based automatic detection (both desk-height classification and pose-estimation leg-motion detection) considered and explicitly ruled out — available camera views don't show the legs/under-desk area, a hardware constraint, not just an effort trade-off. See docs/SPEC.md §7.
 - **Work-cap ↔ walking interaction:** the daily work cap is not fixed — it's a live "effective cap" = base cap − max(0, 60 − minutes walked today), recalculated continuously. Emergency Mode stacks an additional +1h on top of whatever the effective cap is at the time of activation (confirmed with contributor).
 - **Weekday vs weekend base cap:** base cap is 10–11h on weekdays, **3h/day on weekends** (assumed Sat+Sun — flagged for confirmation). All other mechanics (effective-cap formula, Emergency Mode, its 3h/week shared budget) apply identically on both.
+- **Timer as a pure state machine:** `pomodoro_guardian/timer.py` takes its clock as an argument and returns events instead of firing callbacks — no threads, no sleeping, no UI. Everything with a real duration (a 25-minute interval, a 4th-cycle long break, an hour-long idle gap) is therefore testable in milliseconds without a display or input hooks, which matters because every other part of Phase 1 needs a live Windows session to exercise.
+- **Work is credited against input timestamps, not tick deltas:** the engine advances a watermark up to the last real keystroke. The 30s `input_gap` grace still bridges a pause in typing — it's paid retroactively when you resume — but silence is never credited on its own, and the first keystroke after the machine wakes can't buy back the hours it spent asleep. Two Phase 1 tests failed on exactly these before the fix.
+- **Lock safety hatch:** `Config.safety_unlock` (on by default) releases the lock if you hold Escape for 3s. Enforcement is deliberately weakened while the lock is young — a bug in a 25-minute unattended lock strands you on your own machine. Turn it off via `--no-safety-unlock` once it's proven itself. Ctrl+Alt+Del is never blocked: that needs a kernel driver, which is the wrong trade for enforcing coffee breaks.
+- **Dev environment:** Python 3.12.10 (winget) with a repo-local, gitignored `.venv`. Tests: `.venv\Scripts\python.exe -m pytest tests`.
 - **Dev/documentation location:** this repo (`C:\Users\tetiana.ronska\repos\pomodoro-app`) is now the canonical, git-backed Claude Code/Cowork project — see `CLAUDE.md`. Work happens directly in this repo (via the Cowork device bridge or a native Claude Code session), not in a separate Claude-session workspace mirrored out afterward.
 
 ## Open items
 
-- Exact daily work cap: 10h vs 11h (default 10.5h pending a decision).
-- Long-break-every-4th-cycle reset rule: fixed daily reset time vs. reset after any idle gap.
+- Exact daily work cap: 10h vs 11h (default 10.5h pending a decision). Needed by Phase 4.
 - App name/branding.
 - First-run setup flow details (Google OAuth consent screen, etc.).
+- Confirm "weekend" = Saturday + Sunday, and that Emergency Mode's 3h/week budget is one pool across all 7 days. Both assumed in docs/SPEC.md §5; needed by Phase 4.
+- Whether to keep `Config.safety_unlock` (hold Escape to release the lock) on. Currently on — see Architectural decisions.
+
+### Resolved
+
+- ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### Session 3 — 2026-08-09
+
+First session in native Claude Code on the contributor's machine rather than through the Cowork device bridge. **Phase 1 built, tested, and committed** (`8648860`).
+
+Pushed the backlog first: `git push -u origin main` succeeded immediately, so the six earlier commits are now on GitHub. The bridge's lack of network access was the only thing blocking it.
+
+**Built** — `pomodoro_guardian/`, ~830 lines across six modules:
+- `timer.py` — the rhythm as a pure state machine (see Architectural decisions).
+- `activity.py` — `GetLastInputInfo` backend, which reads system-wide idle time with no hooks at all and is the right default; `pynput` event-listener fallback; scriptable fake for tests.
+- `overlay.py` — the lock: borderless, always-on-top, sized to the virtual-screen bounding box so it covers every monitor, with global input suppression underneath. Re-asserts topmost every tick so nothing can climb above it mid-break.
+- `app.py` — ticks the engine off the tkinter loop; `--dry-run` and `--demo FACTOR` make a full cycle observable without waiting half an hour.
+- `config.py` — every duration in one frozen dataclass, since docs/SPEC.md §10 still has open values.
+
+**Two real bugs, caught by tests, not by reading.** Both traced to one root cause: the 30-second `input_gap` grace was being counted as work. It let the start threshold be satisfied by silence (a 50s typing run plus 30s of grace tripped a 60s threshold), and it accrued 30s of every idle stretch into the work interval. Fixed by crediting work against a watermark of the last real keystroke. This also closed a bug no test had targeted yet: after a machine wakes from sleep, the first keystroke would have retroactively bought the entire time it spent asleep. **16/16 tests pass.**
+
+**Verified on real hardware** — the part previous sessions could not do:
+- `GetLastInputInfo` returns sane live idle times.
+- Full cycle through work → warning → lock → unlock over four cycles, with the long break landing correctly on the 4th.
+- The lock overlay actually locked: covered both monitors at exactly `-1920,0 → 5120x1080` (the contributor runs a dual-monitor setup with the second display to the *left* of the primary, so the geometry string carries a negative offset — verified Tk applies it rather than clamping to zero, which would have left that monitor exposed), stayed topmost, suppressed input, released cleanly. Whether keystrokes were genuinely swallowed from other apps was observed by the contributor, not measured here.
+
+**Environment:** the machine had no Python at all — only the Microsoft Store alias stubs on `PATH`. Installed 3.12.10 via winget with approval, plus a gitignored `.venv` with `requirements.txt` + pytest. Logged in `ISSUES.md`.
+
+**Decisions:**
+- Long-break reset: **after an idle gap**, not a fixed daily time (closes a docs/SPEC.md §10 open item).
+- Lock keeps a hold-Escape safety release while the code is young; Ctrl+Alt+Del stays available permanently by design.
+
+**Workflow issues logged to `ISSUES.md`:** `laivly-global-session` is declared a hard gate in `CLAUDE.md` but isn't installed in native Claude Code — the gate is unsatisfiable exactly where the app code gets written; proceeded with contributor approval from the practices already documented in-repo. Also confirmed the device-bridge git-lock caveat is **bridge-only** (a dozen native git commands left no locks), but a stale `.git/HEAD.lock` from the previous bridge session survived into this one and would have failed the first commit — read-only commands and even `push` ignored it, so it stayed invisible until then.
+
+**Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Worth doing before Phase 2 starts: run the app for a real 25-minute cycle to confirm the lock behaves unattended, and decide whether `safety_unlock` stays on.
 
 ### Session 2 — 2026-08-09
 

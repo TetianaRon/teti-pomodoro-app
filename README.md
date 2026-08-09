@@ -12,10 +12,11 @@ architectural decisions, and the session worklog.
 
 ## Status
 
-Project scaffold and requirements are complete; app implementation has not
-started yet. Check `PLAN.md`'s Phases list for current status — phases are
-built in order, starting with the core loop (activity detection → Pomodoro
-timer → full-screen lock overlay).
+**Phase 1 (core loop) is complete:** activity detection, the Pomodoro timer,
+and the full-screen lock overlay all work. None of the escape hatches exist
+yet — no exclusions, skips, work cap, Focus Mode, or walking tracking, so
+right now every break locks the screen unconditionally. Check `PLAN.md`'s
+Phases list for what's next.
 
 ## Structure
 
@@ -41,9 +42,37 @@ only, no cloud sync.
 
 ## Setup
 
+Windows only — the activity detector, lock overlay, and packaging all target
+Windows specifically. Needs Python 3.12 (`winget install Python.Python.3.12`
+if the machine has none; note that `python.exe` on `PATH` may be nothing but
+a Microsoft Store alias stub).
+
 ```
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt pytest
 ```
 
-Windows only — the activity detector, lock overlay, and packaging target
-Windows specifically.
+## Running
+
+```
+.venv\Scripts\python.exe -m pomodoro_guardian                 # for real
+.venv\Scripts\python.exe -m pomodoro_guardian --dry-run       # log only, never locks
+.venv\Scripts\python.exe -m pomodoro_guardian --demo 60       # 25s work / 5s break
+```
+
+**The lock is real** — it covers every monitor and blocks keyboard and mouse.
+Ctrl+Alt+Del still works and always will. While `--no-safety-unlock` is off
+(the default), holding Escape for 3 seconds also releases it; that hatch
+exists because the lock is young code, and is meant to be turned off once
+you trust it.
+
+## Tests
+
+```
+.venv\Scripts\python.exe -m pytest tests
+```
+
+The Pomodoro state machine takes its clock as an argument, so the whole
+rhythm — 25-minute intervals, 4th-cycle long breaks, hour-long idle gaps —
+is covered without a display or a wait. The lock overlay and the global
+input hooks need a real Windows session and are smoke-tested by hand.
