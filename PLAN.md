@@ -92,6 +92,25 @@ Also confirmed the **long break is 15 min**, settling docs/SPEC.md §2.2's 15–
 
 Closed the last calendar-driven open item by adding the **manual day-type override** (docs/SPEC.md §5a) — the resolution to the one limitation the ≥6h rule couldn't engineer away.
 
+### Phase 1 verified end-to-end on real hardware (2026-08-09)
+
+A full unattended 25-minute run, then targeted tests for the parts it couldn't cover. **Everything passed.**
+
+**The timing was exact to the second.** Launched 04:09:12 → work started 04:10:13 (61s, the 60s threshold) → warning 04:32:13 (*exactly* 22:00 later) → lock 04:34:13 (*exactly* 2:00 after the warning) → Escape hold released it at 04:34:33. No `paused` events across 24 minutes of continuous typing, and zero drift — the watermark crediting tracks real input second-for-second.
+
+Confirmed by the contributor:
+- **Keyboard suppression genuinely reaches other apps.** Tested differentially: typing into Notepad while only the banner was up worked; typing during the lock produced nothing. This mattered because pynput uses *independent* keyboard and mouse listeners, so the already-confirmed mouse block did not imply it.
+- **All three monitors show a correctly centred countdown.**
+- **The Escape safety release works under live input suppression** — the riskiest untested claim in Phase 1, since a failure there means being stranded on your own machine.
+
+**Two overlay bugs found, both by measuring rather than reading the code.** The 5-second smoke test had checked window *geometry* and never where the content landed:
+1. Children were packed without `expand`, stacking against the top edge instead of centring; and a single window spanning the virtual screen centres on the bounding box, not on any real monitor. Fixed with one window per monitor.
+2. The warning banner was **48 pixels wide** — its label was created empty and measured for placement before receiving text, so it anchored off bare padding, then grew past the primary monitor's edge onto the laptop panel. Invisible in practice. Fixing that surfaced a third: `show()` assigned `self._window` after calling `_reposition()`, which returns early on `None`, so the banner silently never moved from (0,0).
+
+**Lesson worth carrying into later phases:** a UI smoke test that asserts on geometry while never inspecting where content actually renders will pass while the screen looks wrong. Assert on the rendered rect.
+
+**Banner design settled:** click-through (`WS_EX_TRANSPARENT` + `WS_EX_NOACTIVATE`), readable at 90% by default and fading to 15% as the cursor approaches — a warning has two minutes to be noticed, so it should be visible, and hover is exactly when it should get out of the way. Hover is found by polling the cursor position, because a click-through window receives no mouse events and so never fires `<Enter>`/`<Leave>`.
+
 **Next:** Phase 2 — video call / screen share detection (docs/SPEC.md §3). Worth doing before Phase 2 starts: run the app for a real 25-minute cycle to confirm the lock behaves unattended, and decide whether `safety_unlock` stays on.
 
 ### Session 2 — 2026-08-09
