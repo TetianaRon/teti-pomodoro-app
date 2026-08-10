@@ -86,6 +86,13 @@ class PomodoroEngine:
         self._paused = False
         self._cycles_reset_pending = False  # dedupes CYCLES_RESET per idle gap
         self._excluded = False
+        # Total work credited since this engine started. The app turns the
+        # delta into a persisted daily total; the engine itself has no idea
+        # what day it is and deliberately keeps it that way.
+        self.worked_total = 0.0
+        # Set by the app once the daily cap is exceeded (SPEC §5): work
+        # intervals shorten so breaks arrive often enough to be a nudge.
+        self.overtime = False
         # When an exclusion lifts, idle is measured from that moment rather
         # than from the last keystroke: you were at the desk for the call,
         # you just weren't typing.
@@ -160,7 +167,7 @@ class PomodoroEngine:
         so it must not bring the long break closer.
         """
         self.state = State.WORK
-        self._work_elapsed = max(0.0, self.config.work_duration - seconds)
+        self._work_elapsed = max(0.0, self.work_duration() - seconds)
         self._credited_through = now
         self._break_is_long = False
         self._paused = False
@@ -244,7 +251,9 @@ class PomodoroEngine:
             # the grace window gets paid once you resume; nothing beyond it
             # ever does, because the branch below pins the watermark to now.
             if last_input_at > self._credited_through:
-                self._work_elapsed += last_input_at - self._credited_through
+                credited = last_input_at - self._credited_through
+                self._work_elapsed += credited
+                self.worked_total += credited
                 self._credited_through = last_input_at
             if self._paused:
                 self._paused = False
@@ -259,7 +268,7 @@ class PomodoroEngine:
             self.state = State.WARNING
             events.append(Event.WARNING_STARTED)
 
-        if self._work_elapsed >= self.config.work_duration:
+        if self._work_elapsed >= self.work_duration():
             events.append(self._start_break(now))
 
         return events
@@ -309,8 +318,23 @@ class PomodoroEngine:
         self._active_since = None
         self._break_is_long = False
 
+    def work_duration(self) -> float:
+        """Length of a work interval — shortened past the daily cap."""
+        return (
+            self.config.overtime_work_duration
+            if self.overtime
+            else self.config.work_duration
+        )
+
+    def warning_lead(self) -> float:
+        return (
+            self.config.overtime_warning_lead
+            if self.overtime
+            else self.config.warning_lead
+        )
+
     def _warn_at(self) -> float:
-        return max(0.0, self.config.work_duration - self.config.warning_lead)
+        return max(0.0, self.work_duration() - self.warning_lead())
 
     def _break_duration(self) -> float:
         return (
@@ -327,5 +351,5 @@ class PomodoroEngine:
                 - (self._last_update - self._break_started_at),
             )
         if self.state in (State.WORK, State.WARNING):
-            return max(0.0, self.config.work_duration - self._work_elapsed)
+            return max(0.0, self.work_duration() - self._work_elapsed)
         return 0.0

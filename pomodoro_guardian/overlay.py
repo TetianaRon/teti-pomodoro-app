@@ -221,6 +221,10 @@ class SkipOffer:
 
     options: tuple[SkipOption, ...] = ()
     remaining: float = 0.0
+    #: Emergency Mode (SPEC §5), offered on the same gesture rather than a
+    #: second one — it is wanted at exactly the moment the skip menu is up.
+    emergency: SkipOption | None = None
+    note: str = ""
 
     @property
     def any_available(self) -> bool:
@@ -243,6 +247,7 @@ class LockOverlay:
         config: Config = DEFAULT,
         skip_offer: "callable | None" = None,
         on_skip: "callable | None" = None,
+        on_emergency: "callable | None" = None,
     ) -> None:
         self._root = root
         self._config = config
@@ -251,6 +256,7 @@ class LockOverlay:
         # by --no-exclusions style development runs.
         self._skip_offer = skip_offer
         self._on_skip = on_skip
+        self._on_emergency = on_emergency
         self._windows: list[tk.Toplevel] = []
         self._countdowns: list[tk.Label] = []
         self._bodies: list[tk.Frame] = []
@@ -479,6 +485,22 @@ class LockOverlay:
         for index, option in enumerate(self._offer.options, start=1):
             self._build_key(row, str(index), option)
 
+        if self._offer.emergency is not None:
+            # Visually separated: this spends a weekly budget, not the
+            # daily skip one, and shouldn't read as a fourth skip length.
+            tk.Frame(frame, bg=self.FAINT, height=1, width=340).pack(
+                pady=(20, 0)
+            )
+            emergency_row = tk.Frame(frame, bg=self.BG)
+            emergency_row.pack(pady=(16, 0))
+            self._build_key(emergency_row, "E", self._offer.emergency)
+
+        if self._offer.note:
+            tk.Label(
+                frame, text=self._offer.note, font=("Segoe UI", 11),
+                bg=self.BG, fg=self.MUTED,
+            ).pack(pady=(14, 0))
+
         remaining = self._offer.remaining / 60
         tk.Label(
             frame,
@@ -525,6 +547,13 @@ class LockOverlay:
             if self._swallow_escape:
                 return   # still the hold that opened the menu
             self._close_menu()
+            return
+        if char and char.lower() == "e":
+            emergency = self._offer.emergency
+            if emergency is not None and emergency.enabled:
+                if self._on_emergency is not None:
+                    self._close_menu()
+                    self._on_emergency()
             return
         if char and char.isdigit():
             index = int(char) - 1

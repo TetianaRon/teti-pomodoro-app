@@ -14,6 +14,7 @@ from pathlib import Path
 
 from datetime import date
 
+from . import caps
 from . import settings as settings_module
 from . import state as state_module
 from .activity import ActivityMonitor, create_monitor
@@ -42,8 +43,10 @@ class Application:
         detector: Detector | None = None,
         watcher: CalendarWatcher | None = None,
         state_file: Path | None = None,
+        settings: settings_module.Settings | None = None,
     ) -> None:
         self.config = config
+        self.settings = settings or settings_module.Settings(config=config)
         self.dry_run = dry_run
         self.monitor = monitor if monitor is not None else create_monitor()
         self.watcher = watcher
@@ -69,6 +72,10 @@ class Application:
         self._excluded_since: float | None = None
         self._warned_long_exclusion = False
         self._exclusion = Exclusion()
+        self._last_worked_total = 0.0
+        self._last_state_save = 0.0
+        self._cap: caps.CapStatus | None = None
+        self._announced_over = False
 
         self._root = tk.Tk()
         self._root.withdraw()  # the controller window is never shown
@@ -77,6 +84,7 @@ class Application:
             self._root, config,
             skip_offer=self._skip_offer,
             on_skip=self._take_skip,
+            on_emergency=self._take_emergency,
         )
         self.banner = WarningBanner(self._root, config)
 
@@ -93,16 +101,100 @@ class Application:
             )
             for seconds in self.config.custom_skip_options
         )
-        return SkipOffer(options, self._state.skip_remaining(budget))
+        return SkipOffer(
+            options,
+            self._state.skip_remaining(budget),
+            emergency=self._emergency_option(),
+            note=self._cap.describe() if self._cap else "",
+        )
+
+    def _emergency_option(self) -> SkipOption | None:
+        """Emergency Mode, offered only once the cap is actually reached.
+
+        Showing it earlier would make it look like an ordinary skip; the
+        weekly budget is what keeps it rare (SPEC §5).
+        """
+        if self._cap is None or not self._cap.over:
+            return None
+        grant = self.config.emergency_grant_hours
+        weekly = self.settings.emergency_hours_per_week
+        left = self._state.emergency_remaining(weekly)
+        return SkipOption(
+            seconds=grant * 3600,
+            label=f"Emergency +{grant:.0f}h   ({left:.0f}h left this week)",
+            enabled=self._state.can_use_emergency(grant, weekly),
+        )
+
+    def _take_emergency(self) -> None:
+        """Grant another hour on top of today's cap (SPEC §5)."""
+        grant = self.config.emergency_grant_hours
+        weekly = self.settings.emergency_hours_per_week
+        if not self._state.can_use_emergency(grant, weekly):
+            self._log("emergency mode unavailable — weekly budget spent")
+            return
+        self._state = self._state.with_emergency(grant)
+        self._save_state()
+        self.overlay.release()
+        left = self._state.emergency_remaining(weekly)
+        self._log(
+            f"emergency mode: +{grant:.0f}h "
+            f"({left:.0f}h of weekly budget left)"
+        )
+
+    def _update_cap(self) -> None:
+        """Recompute where the day stands, and shorten intervals if over."""
+        today = date.today()
+        longest = (
+            self.watcher.longest_busy_hours(today)
+            if self.watcher is not None
+            else None
+        )
+        day_type = caps.classify_day(
+            today,
+            longest,
+            self.settings.day_off_block_hours,
+            self._state.day_type_override,
+        )
+        self._cap = caps.status(
+            self._state,
+            day_type,
+            self.settings.working_day_cap_hours,
+            self.settings.non_working_day_cap_hours,
+        )
+        # Past the cap the work interval shortens, so breaks become a
+        # standing nudge rather than the app switching itself off.
+        self.engine.overtime = self._cap.over
+        if self._cap.over and not self._announced_over:
+            self._announced_over = True
+            self._log(
+                f"over the daily cap — {self._cap.describe()}; breaks now every "
+                f"{self.config.overtime_work_duration / 60:.0f} min"
+            )
+        elif not self._cap.over:
+            self._announced_over = False
+
+    def _record_work(self, now: float) -> None:
+        """Fold the engine's credited work into the persisted daily total."""
+        delta = self.engine.worked_total - self._last_worked_total
+        self._last_worked_total = self.engine.worked_total
+        if delta > 0:
+            self._state = self._state.with_work(delta)
+        # Persisted periodically rather than every tick: a crash costs at
+        # most this much of the tally, and the disk stays quiet.
+        if now - self._last_state_save >= 30:
+            self._last_state_save = now
+            self._save_state()
+
+    def _save_state(self) -> None:
+        try:
+            state_module.save(self._state, self._state_file)
+        except OSError as exc:
+            self._log(f"warning: could not save state ({exc})")
 
     def _take_skip(self, seconds: float) -> None:
         """Spend part of the daily budget and push the break back."""
         self._state = self._state.with_skip(seconds)
-        try:
-            state_module.save(self._state, self._state_file)
-        except OSError as exc:
-            # Losing the tally is bad but not worth refusing the skip over.
-            self._log(f"warning: could not save skip budget ({exc})")
+        self._save_state()
         self.overlay.release()
         self.engine.defer_break(seconds, time.monotonic())
         left = self._state.skip_remaining(self.config.custom_skip_daily_budget)
@@ -144,6 +236,7 @@ class Application:
         self.monitor.stop()
         if self.watcher is not None:
             self.watcher.stop()
+        self._save_state()   # don't lose the tally on a clean exit
 
     # -- loop ---------------------------------------------------------
 
@@ -156,7 +249,13 @@ class Application:
             now, self.monitor.last_input_at, excluded=exclusion.active
         )
         snapshot = self.engine.snapshot()
+        self._record_work(now)
+        self._update_cap()
         notice = self._watch_long_exclusion(now, exclusion.active)
+        if notice is None and self._cap is not None and self._cap.over:
+            # A standing marker, so being over the cap is visible without
+            # having to wait for the next break to say so.
+            notice = f"Overtime — {self._cap.describe()}"
 
         for event in events:
             self._handle(event, snapshot)
@@ -195,7 +294,7 @@ class Application:
             self._log("clear again — countdown resumes")
         elif event is Event.WARNING_STARTED:
             self._log(
-                f"break in {self.config.warning_lead / 60:.0f} min"
+                f"break in {self.engine.warning_lead() / 60:.0f} min"
             )
             if not self.dry_run:
                 self.banner.show()
@@ -414,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         detector=NullDetector() if args.no_exclusions else None,
         watcher=watcher,
         state_file=state_module.state_path(path),
+        settings=settings,
     )
     try:
         app.run()

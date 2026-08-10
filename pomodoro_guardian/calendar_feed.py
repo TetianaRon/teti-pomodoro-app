@@ -226,3 +226,36 @@ class Schedule:
         ]
         return max(covering, key=lambda b: b.end) if covering else None
 
+    def longest_block_hours(self, day: date, tz) -> float:
+        """Longest contiguous busy stretch on `day`, in the given timezone.
+
+        Overlapping and touching blocks are merged first, so a meeting
+        booked inside a longer one doesn't read as two short stretches.
+        This is the measurement SPEC §5's day-off rule tests: ordinary
+        weekdays never exceeded 1.5h in the sampled feed, company holidays
+        ran 8.5–12.5h, and vacations a clean 24h.
+
+        Day boundaries are computed in `tz`, not UTC — doing it in UTC
+        misattributes evening events to the following day.
+        """
+        start = datetime.combine(day, datetime.min.time(), tz)
+        end = start + timedelta(days=1)
+
+        clipped = []
+        for block in self.blocks:
+            a = max(block.start.astimezone(tz), start)
+            b = min(block.end.astimezone(tz), end)
+            if b > a:
+                clipped.append((a, b))
+
+        merged: list[list[datetime]] = []
+        for a, b in sorted(clipped):
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+
+        if not merged:
+            return 0.0
+        return max((b - a).total_seconds() for a, b in merged) / 3600
+

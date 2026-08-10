@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from .calendar_feed import BusyBlock, FeedError, Schedule, fetch
 
@@ -103,6 +103,38 @@ class CalendarWatcher:
         return schedule.meeting_at(
             moment, self._day_off_hours, self._meeting_lead
         )
+
+    def longest_busy_hours(self, day: date | None = None) -> float | None:
+        """Longest contiguous busy stretch on `day`, for SPEC §5's day-off rule.
+
+        **None means "no answer"**, not "nothing booked" — no URL, nothing
+        fetched, or a cache too old to trust. The caller falls back to the
+        day-of-week rule and says so, rather than treating missing data as
+        an empty calendar and handing out a full day on a public holiday.
+        """
+        with self._lock:
+            schedule = self._schedule
+            fetched_at = self._fetched_at
+        if schedule is None or fetched_at is None:
+            return None
+        if time.monotonic() - fetched_at > self._max_age:
+            return None
+        return schedule.longest_block_hours(day or date.today(), self._tzinfo(schedule))
+
+    @staticmethod
+    def _tzinfo(schedule):
+        """The feed's own timezone; UTC if it doesn't say or isn't installed."""
+        name = schedule.timezone_name
+        if not name:
+            return timezone.utc
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(name)
+        except Exception:
+            # Windows has no system tz database; tzdata is in requirements
+            # for exactly this, but never fail a cap check over it.
+            return timezone.utc
 
     @property
     def configured(self) -> bool:

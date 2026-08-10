@@ -37,6 +37,17 @@ class Config:
     banner_alpha_hover: float = 0.15
     banner_hover_poll: float = 0.12
 
+    # --- Past the daily cap (SPEC §5) ---
+    # Going over the cap does not switch the app off — that would mean no
+    # breaks exactly when you are most tired. The work interval shortens
+    # sharply instead, so breaks become a standing nudge to stop while
+    # leaving room to wrap up or start Emergency Mode.
+    overtime_work_duration: float = 5 * MINUTE
+    # 2 minutes against a 5-minute interval would leave the banner up
+    # almost half the time.
+    overtime_warning_lead: float = 1 * MINUTE
+    emergency_grant_hours: float = 1.0
+
     # --- Custom break skip (SPEC §4B) ---
     # Fixed choices, offered by the hold-Escape menu against the lock. All
     # skips draw on one accumulated daily budget; once it is spent the menu
