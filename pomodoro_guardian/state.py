@@ -63,6 +63,9 @@ class AppState:
     worked_today: float = 0.0          # seconds of tracked work
     day_type_override: str | None = None   # WORKING / NON_WORKING / None
     walked_today: float = 0.0          # seconds on the treadmill (SPEC §7)
+    # Focus Mode (SPEC §6). Stored in UTC; `uses` is per day.
+    focus_started_at: datetime | None = None
+    focus_uses_today: int = 0
     # Set while a walk is in progress, so an app restart mid-walk doesn't
     # lose the session. Stored in UTC.
     walk_started_at: datetime | None = None
@@ -93,6 +96,10 @@ class AppState:
             # A walk running across midnight keeps running; stopping it
             # silently would lose the time actually spent.
             walk_started_at=self.walk_started_at,
+            # Focus running across midnight likewise continues — its own
+            # two-hour limit ends it soon enough — but the daily use count
+            # resets, which is the budget that matters.
+            focus_started_at=self.focus_started_at,
         )
 
     # -- custom skip budget (SPEC §4B) --------------------------------
@@ -146,6 +153,44 @@ class AppState:
         if label in self.walk_prompts_done:
             return self
         return replace(self, walk_prompts_done=self.walk_prompts_done + (label,))
+
+    # -- Focus Mode (SPEC §6) -----------------------------------------
+
+    @property
+    def focusing(self) -> bool:
+        return self.focus_started_at is not None
+
+    def focus_remaining(
+        self, max_hours: float, now: datetime | None = None
+    ) -> float:
+        """Seconds of Focus Mode left in this session, 0 if not focusing."""
+        if self.focus_started_at is None:
+            return 0.0
+        elapsed = ((now or _now()) - self.focus_started_at).total_seconds()
+        return max(0.0, max_hours * 3600 - elapsed)
+
+    def focus_expired(
+        self, max_hours: float, now: datetime | None = None
+    ) -> bool:
+        return self.focusing and self.focus_remaining(max_hours, now) <= 0
+
+    def can_focus(self, uses_per_day: int) -> bool:
+        """One use a day (SPEC §6), and not while one is already running."""
+        return not self.focusing and self.focus_uses_today < uses_per_day
+
+    def start_focus(self, now: datetime | None = None) -> "AppState":
+        if self.focusing:
+            return self
+        return replace(
+            self,
+            focus_started_at=now or _now(),
+            # Spent on activation, not on completion: otherwise stopping
+            # early and restarting would give unlimited focus time.
+            focus_uses_today=self.focus_uses_today + 1,
+        )
+
+    def stop_focus(self) -> "AppState":
+        return replace(self, focus_started_at=None)
 
     # -- Emergency Mode (SPEC §5) -------------------------------------
 
@@ -229,6 +274,11 @@ class AppState:
                 self.walk_started_at.isoformat() if self.walk_started_at else None
             ),
             "walk_prompts_done": list(self.walk_prompts_done),
+            "focus_started_at": (
+                self.focus_started_at.isoformat()
+                if self.focus_started_at else None
+            ),
+            "focus_uses_today": self.focus_uses_today,
             "emergency_grants": [
                 {"at": g.at.isoformat(), "hours": g.hours}
                 for g in self.emergency_grants
@@ -257,6 +307,8 @@ class AppState:
                 str(x) for x in data.get("walk_prompts_done", [])
                 if isinstance(x, str)
             ),
+            focus_started_at=_moment(data.get("focus_started_at")),
+            focus_uses_today=int(_seconds(data, "focus_uses_today")),
             emergency_grants=grants,
             override_raises=raises,
         )

@@ -93,6 +93,12 @@ class PomodoroEngine:
         # Set by the app once the daily cap is exceeded (SPEC §5): work
         # intervals shorten so breaks arrive often enough to be a nudge.
         self.overtime = False
+        # Focus Mode (SPEC §6). Deliberately *not* the same thing as an
+        # exclusion: an exclusion freezes the countdown, which would make
+        # focus time invisible to the daily cap and let a 2h session be
+        # worked for free. Work accrues as normal here — only the break is
+        # held back, and it fires as soon as focus ends.
+        self.suppress_breaks = False
         # When an exclusion lifts, idle is measured from that moment rather
         # than from the last keystroke: you were at the desk for the call,
         # you just weren't typing.
@@ -263,6 +269,12 @@ class PomodoroEngine:
             if idle_for >= self.config.idle_pause_after and not self._paused:
                 self._paused = True
                 events.append(Event.WORK_PAUSED)
+
+        if self.suppress_breaks:
+            # Focus Mode: keep counting, but neither warn nor lock. The
+            # elapsed interval is left standing, so the break arrives
+            # immediately once focus ends rather than being forgiven.
+            return events
 
         if self.state is State.WORK and self._work_elapsed >= self._warn_at():
             self.state = State.WARNING

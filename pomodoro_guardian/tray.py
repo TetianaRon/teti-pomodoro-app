@@ -22,6 +22,8 @@ import threading
 # Actions posted to the queue and handled by the app.
 START_WALK = "start_walk"
 STOP_WALK = "stop_walk"
+START_FOCUS = "start_focus"
+STOP_FOCUS = "stop_focus"
 OPEN_SETTINGS = "open_settings"
 SET_DAY_OFF = "set_day_off"
 SET_WORKING_DAY = "set_working_day"
@@ -70,6 +72,9 @@ class TrayStatus:
         self.cap_line = ""
         self.walk_line = ""
         self.walking = False
+        self.focusing = False
+        self.focus_label = "Focus Mode"
+        self.focus_enabled = True
         self.override = None          # None / "working" / "non_working"
         self.raises_left = 0
         self.colour = IDLE
@@ -156,6 +161,11 @@ class TrayIcon:
                 ),
                 self._walk_action(),
             ),
+            Item(
+                lambda _: self.status.focus_label,
+                self._focus_action(),
+                enabled=lambda _: self.status.focus_enabled,
+            ),
             Menu.SEPARATOR,
             Item("Treat today as a day off", post(SET_DAY_OFF),
                  checked=lambda _: self.status.override == "non_working",
@@ -184,6 +194,11 @@ class TrayIcon:
         """One item that starts or stops, depending on the current state."""
         def clicked(*_):
             self.actions.put(STOP_WALK if self.status.walking else START_WALK)
+        return clicked
+
+    def _focus_action(self):
+        def clicked(*_):
+            self.actions.put(STOP_FOCUS if self.status.focusing else START_FOCUS)
         return clicked
 
     # -- icon ---------------------------------------------------------

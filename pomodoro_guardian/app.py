@@ -176,6 +176,42 @@ class Application:
         if total >= target:
             self.walk_prompt.hide()
 
+    # -- Focus Mode (SPEC §6) -----------------------------------------
+
+    def _start_focus(self) -> None:
+        """Suppress breaks for a deep-work stretch, once a day."""
+        if not self._state.can_focus(self.settings.focus_uses_per_day):
+            reason = (
+                "already running" if self._state.focusing
+                else "already used today"
+            )
+            self._log(f"focus mode unavailable — {reason}")
+            return
+        self._state = self._state.start_focus()
+        self._save_state()
+        self._log(
+            f"focus mode started — up to "
+            f"{self.settings.focus_max_hours:.0f}h, breaks suppressed"
+        )
+
+    def _stop_focus(self, expired: bool = False) -> None:
+        if not self._state.focusing:
+            return
+        self._state = self._state.stop_focus()
+        self._save_state()
+        self._log(
+            "focus mode ended — its two hours are up" if expired
+            else "focus mode ended"
+        )
+
+    def _update_focus(self) -> None:
+        """Apply Focus Mode to the engine, and end it when its time is up."""
+        if self._state.focus_expired(self.settings.focus_max_hours):
+            self._stop_focus(expired=True)
+        # Breaks are suppressed, but work still accrues — focus time has to
+        # count against the daily cap or a 2h session would be free.
+        self.engine.suppress_breaks = self._state.focusing
+
     # -- tray (SPEC §9) -----------------------------------------------
 
     def _drain_tray(self) -> None:
@@ -190,6 +226,10 @@ class Application:
                 self._start_walk()
             elif action == tray.STOP_WALK:
                 self._stop_walk()
+            elif action == tray.START_FOCUS:
+                self._start_focus()
+            elif action == tray.STOP_FOCUS:
+                self._stop_focus()
             elif action == tray.OPEN_SETTINGS:
                 self._open_settings()
             elif action == tray.SET_DAY_OFF:
@@ -245,9 +285,25 @@ class Application:
         }[snapshot.state]
         if snapshot.excluded:
             status.summary = "holding off"
+        elif self._state.focusing:
+            status.summary = "focus mode"
         status.cap_line = self._cap.describe() if self._cap else ""
         status.walk_line = f"walked {walked:.0f} of {target:.0f} min"
         status.walking = self._state.walking
+        status.focusing = self._state.focusing
+        if self._state.focusing:
+            left = self._state.focus_remaining(self.settings.focus_max_hours)
+            status.focus_label = f"Stop Focus Mode ({left / 60:.0f} min left)"
+            status.focus_enabled = True
+        elif self._state.can_focus(self.settings.focus_uses_per_day):
+            status.focus_label = (
+                f"Start Focus Mode (up to "
+                f"{self.settings.focus_max_hours:.0f}h)"
+            )
+            status.focus_enabled = True
+        else:
+            status.focus_label = "Focus Mode — used today"
+            status.focus_enabled = False
         status.override = self._state.day_type_override
         status.raises_left = max(
             0,
@@ -400,6 +456,7 @@ class Application:
         snapshot = self.engine.snapshot()
         self._drain_tray()
         self._record_work(now)
+        self._update_focus()
         self._update_walking()
         self._update_cap()
         self._refresh_tray()

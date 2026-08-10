@@ -10,7 +10,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call
 3. ✅ Break-skip system (calendar meeting skip + capped custom skip) — complete 2026-08-09
 4. ✅ Daily work cap + Emergency Mode — complete 2026-08-09
-5. ⏳ Focus Mode
+5. ✅ Focus Mode — complete 2026-08-09
 6. ✅ Walking/standing-desk manual tracking (toggle + 60 min/day tally + live effective work-cap formula) — complete 2026-08-09
 7. 🔄 Local history log + tray summary view — tray icon and menu built 2026-08-09; SQLite history log still to do
 8. ⏳ Packaging as Windows `.exe`, first-run setup flow
