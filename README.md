@@ -31,6 +31,8 @@ Phases list for what's next.
   a build phase.
 - `ISSUES.md` — local issues log for workflow friction noticed while
   building this project.
+- `ATTRIBUTION.md` — third-party content, and the licensing work required
+  before this app could be published.
 
 ## Tech stack
 
@@ -104,6 +106,12 @@ check the level. `--test-sounds` lists what it found and plays both.
 That folder is gitignored: the clips are third-party stock audio, so the app
 discovers whatever is present rather than depending on particular files. With
 none installed, breaks are simply silent.
+
+The clips currently in use came from [Pixabay](https://pixabay.com/) and are
+credited in `ATTRIBUTION.md`. ⚠️ **That file also records what has to happen
+before this app is ever published** — the Pixabay licence permits free use but
+not redistributing unmodified clips, and the files are still in git history
+from before the ignore rule existed.
 
 **The lock is real** — it covers every monitor and blocks keyboard and mouse.
 Ctrl+Alt+Del still works and always will. While `--no-safety-unlock` is off
