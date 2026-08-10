@@ -13,7 +13,11 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Pomodoro Guardian"
-MUTEX_NAME = "Global\\PomodoroGuardian_SingleInstance"
+# Session-scoped, not "Global\". This is a per-user app, and the global
+# namespace needs a privilege that can be absent — in which case the
+# create fails and every copy would think it was the first.
+MUTEX_NAME = "PomodoroGuardian_SingleInstance"
+ERROR_ALREADY_EXISTS = 183
 SHORTCUT_NAME = "Pomodoro Guardian.lnk"
 
 
@@ -38,29 +42,49 @@ class SingleInstance:
         self._handle = None
 
     def acquire(self) -> bool:
-        """True if we are the only instance. False means one is running."""
-        try:
-            import win32api
-            import win32event
-            import winerror
-        except ImportError:
-            return True   # can't check; don't block startup over it
+        """True if we are the only instance. False means one is running.
 
-        self._handle = win32event.CreateMutex(None, True, self._name)
-        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            self._handle = None
+        ctypes with `use_last_error` rather than pywin32, so the error code
+        is read from a value saved at the call itself — `GetLastError()` is
+        per-thread and easily clobbered by anything in between.
+
+        If the mutex cannot be created at all, this returns True: failing
+        to start is worse than the small risk of a second copy, and the
+        caller has no better information to act on.
+        """
+        if not sys.platform.startswith("win"):
+            return True
+        try:
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateMutexW.restype = ctypes.c_void_p
+            handle = kernel32.CreateMutexW(None, True, self._name)
+            error = ctypes.get_last_error()
+        except Exception:  # pragma: no cover - can't check; don't block startup
+            return True
+
+        if not handle:
+            return True
+        if error == ERROR_ALREADY_EXISTS:
+            self._close(handle)
             return False
+        self._handle = handle
         return True
 
     def release(self) -> None:
         if self._handle is not None:
-            try:
-                import win32api
-
-                win32api.CloseHandle(self._handle)
-            except Exception:  # pragma: no cover - teardown must not raise
-                pass
+            self._close(self._handle)
             self._handle = None
+
+    @staticmethod
+    def _close(handle) -> None:
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
+        except Exception:  # pragma: no cover - teardown must not raise
+            pass
 
 
 # -- logging ----------------------------------------------------------
