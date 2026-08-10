@@ -208,7 +208,24 @@ Google's `basic.ics` published both the original and the rescheduled event withi
 
 **Still open:** Phase 5 (Focus Mode) is unbuilt; Phase 7's SQLite history log is unbuilt; Phase 8 packaging untouched. Settings apply unevenly by design — caps, walking and calendar values are re-read each tick, while rhythm and lock values are baked in at construction and need a restart, which the app says rather than silently ignoring half an edit.
 
-**Next:** Phase 5 (Focus Mode, docs/SPEC.md §6) or Phase 7's history log. Both are smaller than what has just been built.
+**Verified on the machine:** the tray icon appears, the menu opens on **left click** (the `WM_LBUTTONUP` remap works), every menu item behaves — both walk sessions tracked, and all three day-type override states applied and reverted, including falling back to `day off (weekend)` when the override was cleared on a Sunday. Dragging the icon out of the overflow pins it, and the pin survives a restart.
+
+### Session close — 2026-08-09 (second sitting)
+
+**Phases 2, 3, 4 and 6 complete, plus the tray from Phase 7.** Test count went 16 → 202. `main` clean and pushed throughout.
+
+**The through-line of the whole day: code that read correctly, passed its tests, and was wrong.** Nine bugs found this way, none by review — a `NameError` on a path that had never executed, `root.after()` from a listener thread, Escape-hold depending on key auto-repeat, the hold that opened the skip menu dismissing it, three failed media mechanisms, a UTC/local date comparison, and a tkinter padding tuple. Every one needed something real: a live call, a real keyboard, a playing video, an evening clock.
+
+**The method lesson is as valuable as any of the fixes.** Three timed on-screen diagnostics produced no usable data at all, because their prompts print to a console sitting behind a lock. What worked was `local/checklock.py` and `local/checkwalk.py`: scripts the contributor runs, seeing prompts live, with the script reporting afterwards. Reuse that shape for anything that only runs behind a lock or needs a real click.
+
+**Contributor decisions that improved the design**, each overriding what was specced or built:
+- Past the cap, shorten work intervals rather than switch the app off — the literal spec would have removed breaks exactly when most needed.
+- Reverse the banner's hover: visible by default, fading on approach. A warning has two minutes to be noticed.
+- Hold breaks off *before* a meeting, not just during — a lock three minutes before a call is worse than one inside it.
+- Simplify the media controls to a single automatic pause after the key-based version proved erratic.
+- A tray control for walking, because a prompt you must wait for is not a tracker.
+
+**Next:** Phase 5 (Focus Mode, docs/SPEC.md §6) is small — one more capped override, and the machinery exists. Phase 7's SQLite history log would show whether the caps and walking target are set right. Phase 8 packaging is what decides whether this gets used daily.
 
 ### Session 2 — 2026-08-09
 
