@@ -2,49 +2,59 @@
 
 ## Break chime sound effects
 
-Five bell clips, downloaded from [Pixabay](https://pixabay.com/) and used as
-the break start/end chimes. They live in `assets/sound-effects/`, which is
+Five bell clips from [Pixabay](https://pixabay.com/), used as the break
+start/end chimes. They live in `assets/sound-effects/`, which is
 **gitignored** — see the warning below for why.
 
-Pixabay does not require attribution. These are credited anyway, because the
-uploader and item id are the only things tying a file to its source, and that
-link is worth keeping.
+**Attribution is not required.** The Pixabay Content License says you may
+"use Content without having to attribute the author (although giving credit is
+always appreciated by our community!)". These are credited voluntarily, and
+because the link back to each source is the only way to re-check a licence
+later.
 
-| Uploader | Clip | Pixabay id |
+| Clip | Credited to | Source |
 | --- | --- | --- |
-| `alexis_gaming_cam` | bell notification | 337658 |
-| `dragon-studio` | notification bell sound 1 | 376885 |
-| `freesound_community` | bell chord 1 | 83260 |
-| `freesounds123` | bell sound | 370341 |
-| `universfield` | bell ring | 123742 |
+| Bell Notification | ALEXIS_GAMING_CAM | [pixabay.com/sound-effects/bell-notification-337658](https://pixabay.com/sound-effects/bell-notification-337658/) |
+| Notification Bell Sound 1 | DRAGON-STUDIO | [pixabay.com/sound-effects/notification-bell-sound-1-376885](https://pixabay.com/sound-effects/notification-bell-sound-1-376885/) |
+| Bell chord1 | pac007, via Freesound | [pixabay.com/sound-effects/bell-chord1-83260](https://pixabay.com/sound-effects/bell-chord1-83260/) |
+| bell sound | freesounds123 | [pixabay.com/sound-effects/bell-sound-370341](https://pixabay.com/sound-effects/bell-sound-370341/) |
+| Bell Ring | Universfield | [pixabay.com/sound-effects/bell-ring-123742](https://pixabay.com/sound-effects/bell-ring-123742/) |
 
-Uploader names and ids are read from the filenames Pixabay assigns on
-download; the ids locate each item on the site. They were not recorded
-separately at download time, so treat them as derived rather than verified.
+Every row was checked against the live page rather than inferred from the
+download filename. Worth having done: "Bell chord1" is filed on Pixabay under
+the `freesound_community` account, but the actual author is **pac007** on
+Freesound — crediting the account name would have credited the wrong person.
 
 ## ⚠️ Before this app is ever published
 
-It is a personal, single-machine app today and this does not matter. If that
-changes, two things need doing **before** the repository is made public or the
-app is distributed:
+It is a personal, single-machine app today, and none of this matters at that
+scale. If that changes, two things need doing **before** the repository is made
+public or the app is distributed to anyone.
 
-1. **The clips must not ship as-is.** The Pixabay Content License permits free
-   use in projects, commercial or not, but prohibits distributing content "on
-   a standalone basis" — unmodified files to which no creative effort has been
-   applied. Five untouched mp3s in a repository is plausibly exactly that.
-   Re-read the current licence text and either replace them with clips whose
-   licence clearly allows redistribution, or ship none and have the user
-   supply their own. The app already handles an empty sounds folder by staying
-   silent, so shipping without any is a supported state.
+**1. The clips must not ship as they are.** The Pixabay Content License is
+permissive about *use* — commercial or not, no attribution — but explicit
+about redistribution:
 
-2. **They are in git history.** `assets/sound-effects/` is gitignored now, but
-   the five files were committed at the repository root in `e9c2dc6` before
-   that rule existed, and pushed. HEAD is clean; history is not. Purging them
-   needs a history rewrite and a force-push, which is why it has not been done
-   for a private personal repo — but it must happen before the repo goes
-   public.
+> You cannot sell or distribute Content (either in digital or physical form)
+> on a Standalone basis. Standalone means where no creative effort has been
+> applied to the Content and it remains in substantially the same form as it
+> exists on our website.
+
+Five untouched mp3s in a repository is plausibly exactly that. Re-read the
+licence as it stands at the time, then either replace them with clips whose
+terms clearly permit redistribution, or ship none and let the user supply
+their own. The app already treats an empty `assets/sound-effects/` as a
+supported state and simply stays silent, so shipping without any needs no code
+change.
+
+**2. They are in git history.** `assets/sound-effects/` is gitignored now, but
+the five files were committed at the repository root in `e9c2dc6` before that
+rule existed, and pushed. HEAD is clean; history is not. Purging them needs a
+history rewrite and a force-push, which is why it has been left for a private
+personal repo — but it has to happen before the repo becomes public.
 
 ## Everything else
 
-All other assets are generated by this project: `assets/pomodoro.ico` and the
-tray icon are drawn in code by `pomodoro_guardian/tray.py`.
+All other assets are generated by this project. `assets/pomodoro.ico`, the
+window icon and the tray icon are drawn in code by
+`pomodoro_guardian/tray.py`.
