@@ -20,6 +20,7 @@ from tkinter import ttk
 from . import calendar_feed, settings as settings_module
 from .config import MINUTE
 from .settings import Settings
+from .walking import parse_times
 
 PAD = 10
 
@@ -73,6 +74,14 @@ class SetupDialog:
             "long_break_every": tk.StringVar(value=str(c.long_break_every)),
             "warning_lead": tk.StringVar(value=_mins(c.warning_lead)),
             "safety_unlock": tk.BooleanVar(value=c.safety_unlock),
+            "skip_budget": tk.StringVar(
+                value=_mins(c.custom_skip_daily_budget)),
+            "overtime": tk.StringVar(
+                value=_mins(c.overtime_work_duration)),
+            "focus_hours": tk.StringVar(value=_num(settings.focus_max_hours)),
+            "focus_uses": tk.StringVar(value=str(settings.focus_uses_per_day)),
+            "walk_times": tk.StringVar(
+                value=", ".join(settings.walking_reminder_times)),
             "working_cap": tk.StringVar(
                 value=_num(settings.working_day_cap_hours)),
             "non_working_cap": tk.StringVar(
@@ -87,10 +96,21 @@ class SetupDialog:
 
         body = ttk.Frame(outer)
         body.grid(row=2, column=0, sticky="ew")
-        self._build_calendar(body, 0)
-        self._build_rhythm(body, 1)
-        self._build_lock(body, 2)
-        self._build_caps(body, 3)
+        # Two columns below a full-width calendar row. In one column this
+        # reached 994px, which fits the 1080p monitor but runs off the
+        # bottom of the 1280x800 laptop panel — taking the Save button
+        # with it.
+        self._build_calendar(body, 0, columnspan=2)
+        left = ttk.Frame(body)
+        left.grid(row=1, column=0, sticky="nw", padx=(0, 14))
+        right = ttk.Frame(body)
+        right.grid(row=1, column=1, sticky="nw")
+
+        self._build_rhythm(left, 0)
+        self._build_breaks(left, 1)
+        self._build_caps(right, 0)
+        self._build_focus(right, 1)
+        self._build_walking(right, 2)
 
         self._error = ttk.Label(outer, text="", foreground="#b3261e")
         self._error.grid(row=3, column=0, sticky="w", pady=(PAD, 0))
@@ -109,8 +129,8 @@ class SetupDialog:
 
     # -- sections -----------------------------------------------------
 
-    def _build_calendar(self, parent, row):
-        frame = _section(parent, row, "Work calendar")
+    def _build_calendar(self, parent, row, columnspan=1):
+        frame = _section(parent, row, "Work calendar", columnspan)
         ttk.Label(
             frame,
             text=("Secret iCal address — Google Calendar > Settings > "
@@ -146,18 +166,22 @@ class SetupDialog:
         _field(frame, 4, "Warning before lock", self._vars["warning_lead"],
                "minutes")
 
-    def _build_lock(self, parent, row):
-        frame = _section(parent, row, "Lock")
+    def _build_breaks(self, parent, row):
+        frame = _section(parent, row, "Skipping a break")
         ttk.Checkbutton(
-            frame, text="Allow holding Escape to release a break early",
+            frame, text="Hold Escape during a break to open the skip menu",
             variable=self._vars["safety_unlock"],
         ).grid(row=0, column=0, columnspan=3, sticky="w")
         ttk.Label(
             frame,
-            text=("A safety hatch while the lock is young. Turn it off once "
-                  "you trust it.\nCtrl+Alt+Del always works either way."),
+            text=("Hold it for 3 seconds and choose 5, 10 or 20 minutes; the "
+                  "time comes off the daily budget below.\nTurn this off and "
+                  "a break cannot be skipped at all. Ctrl+Alt+Del always "
+                  "works either way."),
             foreground="#555", justify="left",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
+        _field(frame, 2, "Skip budget", self._vars["skip_budget"],
+               "minutes/day", "shared across every skip")
 
     def _build_caps(self, parent, row):
         frame = _section(parent, row, "Daily limits")
@@ -165,11 +189,36 @@ class SetupDialog:
         _field(frame, 1, "Day off cap", self._vars["non_working_cap"], "hours",
                "weekends, holidays and vacations")
         _field(frame, 2, "Emergency Mode budget", self._vars["emergency"],
-               "hours/week")
+               "hours/week", "+1h each, when you are past the cap")
         _field(frame, 3, "Day-type overrides", self._vars["raises"],
                "per month", "raising a day-off cap back to a full day")
-        _field(frame, 4, "Walking target", self._vars["walking"],
-               "minutes/day", "missing it lowers the cap, minute for minute")
+        _field(frame, 4, "Breaks past the cap", self._vars["overtime"],
+               "minutes", "work interval shortens instead of stopping")
+
+    def _build_focus(self, parent, row):
+        frame = _section(parent, row, "Focus Mode")
+        ttk.Label(
+            frame,
+            text=("Suppresses breaks entirely for deep work. Started from "
+                  "the tray; the time still counts\ntowards your daily cap."),
+            foreground="#555", justify="left",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        _field(frame, 1, "Longest session", self._vars["focus_hours"], "hours")
+        _field(frame, 2, "Uses", self._vars["focus_uses"], "per day")
+
+    def _build_walking(self, parent, row):
+        frame = _section(parent, row, "Walking")
+        _field(frame, 0, "Daily target", self._vars["walking"], "minutes",
+               "missing it lowers the work cap, minute for minute")
+        ttk.Label(frame, text="Remind me at").grid(
+            row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(
+            frame, textvariable=self._vars["walk_times"], width=22,
+        ).grid(row=1, column=1, columnspan=2, sticky="w", padx=8)
+        ttk.Label(
+            frame, text="24-hour times, comma separated — blank for no reminders",
+            foreground="#555",
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
     # -- actions ------------------------------------------------------
 
@@ -219,6 +268,13 @@ class SetupDialog:
                 self._vars["walking"], "Walking target", allow_zero=True)
             meeting_lead = _positive(
                 self._vars["meeting_lead"], "Meeting lead", allow_zero=True)
+            skip_budget = _positive(
+                self._vars["skip_budget"], "Skip budget", allow_zero=True)
+            overtime = _positive(self._vars["overtime"], "Breaks past the cap")
+            focus_hours = _positive(
+                self._vars["focus_hours"], "Longest focus session")
+            focus_uses = int(_positive(
+                self._vars["focus_uses"], "Focus uses", allow_zero=True))
         except ValueError as exc:
             self._error.configure(text=str(exc))
             return
@@ -227,6 +283,16 @@ class SetupDialog:
             self._error.configure(
                 text="The warning must be shorter than the work interval — "
                      "otherwise it would already be showing when work starts.")
+            return
+
+        raw_times = self._vars["walk_times"].get().strip()
+        walk_times = parse_times(
+            [part.strip() for part in raw_times.split(",") if part.strip()]
+        )
+        if raw_times and not walk_times:
+            self._error.configure(
+                text="Reminder times need to look like 11:40, 15:20 "
+                     "(24-hour clock).")
             return
 
         url = self._vars["calendar_url"].get().strip() or None
@@ -238,12 +304,17 @@ class SetupDialog:
             long_break_every=every,
             warning_lead=lead * MINUTE,
             safety_unlock=bool(self._vars["safety_unlock"].get()),
+            custom_skip_daily_budget=skip_budget * MINUTE,
+            overtime_work_duration=overtime * MINUTE,
         )
         self._result = replace(
             self._start,
             config=config,
             calendar_url=url,
             meeting_lead_minutes=meeting_lead,
+            focus_max_hours=focus_hours,
+            focus_uses_per_day=focus_uses,
+            walking_reminder_times=tuple(walk_times),
             working_day_cap_hours=working_cap,
             non_working_day_cap_hours=day_off_cap,
             emergency_hours_per_week=emergency,
@@ -281,9 +352,11 @@ class SetupDialog:
 # -- helpers ----------------------------------------------------------
 
 
-def _section(parent, row, title):
+def _section(parent, row, title, columnspan=1):
     frame = ttk.LabelFrame(parent, text=title, padding=PAD)
-    frame.grid(row=row, column=0, sticky="ew", pady=(0, PAD))
+    frame.grid(
+        row=row, column=0, columnspan=columnspan, sticky="ew", pady=(0, PAD)
+    )
     parent.columnconfigure(0, weight=1)
     return frame
 
