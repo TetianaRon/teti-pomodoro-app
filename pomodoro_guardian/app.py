@@ -615,6 +615,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="open the settings window, then exit",
     )
     parser.add_argument(
+        "--shortcuts",
+        action="store_true",
+        help="create Start Menu and desktop shortcuts, then exit",
+    )
+    parser.add_argument(
         "--no-exclusions",
         action="store_true",
         help="ignore calls and screen sharing; always enforce breaks",
@@ -698,12 +703,25 @@ def main(argv: list[str] | None = None) -> int:
     if runtime.frozen():
         runtime.redirect_output()
 
+    if args.shortcuts:
+        for name, path in (
+            ("Start Menu", runtime.start_menu_shortcut()),
+            ("Desktop", runtime.desktop_shortcut()),
+        ):
+            ok = runtime.create_shortcut(path)
+            print(f"{name:11}: {'created' if ok else 'FAILED'}  {path}")
+        return 0
+
     # Two copies would each install a global input hook and fight over the
     # lock overlay — the worst thing to get wrong in this app.
     instance = runtime.SingleInstance()
     if not instance.acquire():
         print("another copy is already running")
         return 0
+
+    # Without a Start Menu entry the Startup shortcut is the only launcher,
+    # so turning "Start with Windows" off would leave no way back in.
+    runtime.ensure_start_menu_shortcut()
 
     # First run, or an explicit --setup: show the window before anything
     # else starts, so the settings the app runs on are the ones just saved.

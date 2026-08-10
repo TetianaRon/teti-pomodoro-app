@@ -118,15 +118,69 @@ def redirect_output(path: Path | None = None, max_bytes: int = 512_000) -> Path:
 # -- start with Windows -----------------------------------------------
 
 
-def startup_dir() -> Path:
+def programs_dir() -> Path:
     return (
         Path(os.environ.get("APPDATA", Path.home()))
-        / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        / "Microsoft" / "Windows" / "Start Menu" / "Programs"
     )
+
+
+def startup_dir() -> Path:
+    return programs_dir() / "Startup"
 
 
 def startup_shortcut() -> Path:
     return startup_dir() / SHORTCUT_NAME
+
+
+def start_menu_shortcut() -> Path:
+    return programs_dir() / SHORTCUT_NAME
+
+
+def desktop_shortcut() -> Path:
+    return Path(os.environ.get("USERPROFILE", Path.home())) / "Desktop" / SHORTCUT_NAME
+
+
+def create_shortcut(path: Path) -> bool:
+    """Write a .lnk that launches the app. Returns True if it now exists.
+
+    A shortcut is not an executable — it points at the venv's already
+    installed `pythonw.exe` — so it gives security tooling nothing to
+    object to, unlike a PyInstaller build. It also detaches the app from
+    any terminal: started from a shell, the app dies with that window.
+    """
+    target, arguments, workdir = _launch_command()
+    icon = Path(__file__).resolve().parent.parent / "assets" / "pomodoro.ico"
+    try:
+        import pythoncom
+        from win32com.client import Dispatch
+
+        pythoncom.CoInitialize()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        link = Dispatch("WScript.Shell").CreateShortCut(str(path))
+        link.Targetpath = target
+        link.Arguments = arguments
+        link.WorkingDirectory = workdir
+        link.Description = APP_NAME
+        if icon.is_file():
+            link.IconLocation = str(icon)
+        link.save()
+    except Exception:
+        return False
+    return path.is_file()
+
+
+def ensure_start_menu_shortcut() -> bool:
+    """Make the app launchable without a terminal, once.
+
+    Without this the only launcher is the Startup shortcut — so turning
+    "Start with Windows" off deletes the only way to start the app, and
+    turning it back on requires the app to already be running.
+    """
+    shortcut = start_menu_shortcut()
+    if shortcut.is_file():
+        return True
+    return create_shortcut(shortcut)
 
 
 def starts_with_windows() -> bool:
@@ -149,20 +203,7 @@ def set_start_with_windows(enabled: bool) -> bool:
             pass
         return starts_with_windows()
 
-    target, arguments, workdir = _launch_command()
-    try:
-        import pythoncom
-        from win32com.client import Dispatch
-
-        pythoncom.CoInitialize()
-        link = Dispatch("WScript.Shell").CreateShortCut(str(shortcut))
-        link.Targetpath = target
-        link.Arguments = arguments
-        link.WorkingDirectory = workdir
-        link.Description = APP_NAME
-        link.save()
-    except Exception:
-        return False
+    create_shortcut(shortcut)
     return starts_with_windows()
 
 
