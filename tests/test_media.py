@@ -27,9 +27,10 @@ class FakeCtl:
 
 
 class FakeSession:
-    def __init__(self, peak, has_process=True):
+    def __init__(self, peak, has_process=True, pid=4242):
         self._ctl = FakeCtl(peak)
         self.Process = object() if has_process else None
+        self.ProcessId = pid
 
 
 def fake_pycaw(monkeypatch, sessions):
@@ -95,6 +96,29 @@ def test_missing_pycaw_reads_as_silence(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", blocked)
     assert not media.is_audio_playing(samples=1)
+
+
+def test_our_own_chime_does_not_count_as_playing_media(monkeypatch):
+    """The bug this fixes: a paused video started playing on a break.
+
+    The break chime plays through this same process. Counting it as "media
+    is playing" made the toggle fire, and the toggle un-paused whatever the
+    user had deliberately paused.
+    """
+    import os
+
+    fake_pycaw(monkeypatch, [FakeSession(0.6, pid=os.getpid())])
+    assert not media.is_audio_playing(samples=1)
+
+
+def test_someone_elses_audio_still_counts(monkeypatch):
+    import os
+
+    fake_pycaw(
+        monkeypatch,
+        [FakeSession(0.6, pid=os.getpid()), FakeSession(0.4, pid=999_999)],
+    )
+    assert media.is_audio_playing(samples=1)
 
 
 def test_pause_is_skipped_when_nothing_is_playing(monkeypatch):

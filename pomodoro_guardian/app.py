@@ -620,12 +620,15 @@ class Application:
         elif event is Event.BREAK_STARTED:
             kind = "long break" if snapshot.is_long_break else "break"
             self._log(f"{kind} started — locking")
-            sounds.play(self._sound_start)
             self.banner.hide()
             if not self.dry_run:
                 # remaining == the full break length at the moment it starts,
                 # which the overlay needs to show a "back at HH:MM" time.
                 self.overlay.lock(snapshot.is_long_break, snapshot.remaining)
+            # Chimed *after* locking, because lock() decides whether to pause
+            # media by listening for audio — and a chime playing first is
+            # audio. That ordering un-paused a deliberately paused video.
+            sounds.play(self._sound_start)
         elif event is Event.BREAK_ENDED:
             self._log(
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"

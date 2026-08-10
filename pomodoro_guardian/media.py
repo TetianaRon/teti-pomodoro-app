@@ -27,6 +27,7 @@ when something is genuinely making noise.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 
@@ -60,6 +61,12 @@ def is_audio_playing(
     except ImportError:  # pragma: no cover - depends on install state
         return False
 
+    # Our own break chime must never count. It plays through this same
+    # process, so without this the chime is heard as "media is playing" and
+    # the toggle below un-pauses whatever the user had deliberately paused
+    # — which is exactly what happened to a paused browser video.
+    own_pid = os.getpid()
+
     for attempt in range(max(1, samples)):
         try:
             sessions = AudioUtilities.GetAllSessions()
@@ -69,6 +76,8 @@ def is_audio_playing(
             if not session.Process:
                 continue
             try:
+                if _pid_of(session) == own_pid:
+                    continue
                 meter = session._ctl.QueryInterface(IAudioMeterInformation)
                 if meter.GetPeakValue() > threshold:
                     return True
@@ -77,6 +86,16 @@ def is_audio_playing(
         if attempt < samples - 1:
             time.sleep(interval)
     return False
+
+
+def _pid_of(session) -> int | None:
+    """The process id behind an audio session, however pycaw exposes it."""
+    for attribute in ("ProcessId", "pid"):
+        value = getattr(session, attribute, None)
+        if isinstance(value, int):
+            return value
+    process = getattr(session, "Process", None)
+    return getattr(process, "pid", None)
 
 
 def send_play_pause() -> bool:

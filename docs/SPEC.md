@@ -44,6 +44,15 @@ it into silence would *start* playback on every quiet break — worse than the
 problem being solved. If the audio check is unavailable the key is not sent at
 all, failing towards doing nothing.
 
+**The check ignores this app's own audio (fixed 2026-08-10).** Adding break
+chimes broke the guard: the chime played first, the audio check heard it,
+concluded media was playing, and the toggle then *un-paused* a deliberately
+paused browser video. Two changes — the peak check skips sessions belonging to
+our own process id, and the chime now plays after the lock rather than before
+it, so the pause decision is made before any chime audio exists. Measured: the
+chime registers at peak 0.52 on our own pid while `is_audio_playing()` returns
+False.
+
 Media is **not** resumed afterwards. The break exists to get you away from the
 screen, and un-pausing on your behalf would be a surprise rather than a
 courtesy.
