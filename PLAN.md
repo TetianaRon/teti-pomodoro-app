@@ -9,10 +9,10 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
 2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call
 3. ✅ Break-skip system (calendar meeting skip + capped custom skip) — complete 2026-08-09
-4. ⏳ Daily work cap + Emergency Mode
+4. ✅ Daily work cap + Emergency Mode — complete 2026-08-09
 5. ⏳ Focus Mode
-6. ⏳ Walking/standing-desk manual tracking (toggle + 60 min/day tally + live effective work-cap formula)
-7. ⏳ Local history log + tray summary view
+6. ✅ Walking/standing-desk manual tracking (toggle + 60 min/day tally + live effective work-cap formula) — complete 2026-08-09
+7. 🔄 Local history log + tray summary view — tray icon and menu built 2026-08-09; SQLite history log still to do
 8. ⏳ Packaging as Windows `.exe`, first-run setup flow
 
 ## Architectural decisions
@@ -194,7 +194,21 @@ The **10-minute lead window** was confirmed in the same run: the hold began befo
 
 Google's `basic.ics` published both the original and the rescheduled event within a couple of minutes each time, so feed lag is not the obstacle it was expected to be. **Phase 3 now has no unverified paths.**
 
-**Next:** Phase 4 — daily work cap + Emergency Mode (docs/SPEC.md §5, §5a). The pieces are in place: `settings.py` holds the caps, `state.py` holds the daily tallies, and `calendar_feed.py` parses the blocks the day-off rule needs.
+### Phases 4, 6 and the tray — 2026-08-09
+
+**Phase 4 (cap + Emergency Mode).** The literal spec would have switched the app off past the cap, meaning no breaks exactly when most tired. Instead the work interval drops to 5 minutes past the cap, with a persistent overtime marker — escalating pressure rather than an off-switch, decided with the contributor. `caps.py` keeps the rules pure like `timer.py`. Emergency Mode rides the existing hold-Escape menu and appears only once the cap is reached, so it can't be mistaken for a fourth skip length. Its 3h pool is a true rolling 7 days, not a calendar week, so it can't be gamed across a Sunday.
+
+**Phase 6 (walking).** Manual toggle as SPEC §7 always specified, plus scheduled prompts (default 11:40 and 15:20) in a small non-blocking window. §7's shortfall formula is now live — it had been deliberately dormant, since subtracting an hour for an untracked goal would have cut every day short for nothing. A walk in progress counts before it is banked, and survives both a restart and midnight.
+
+**Tray icon, brought forward from Phase 7.** Prompted by a good question: scheduled prompts are a *reminder*, not a tracker — a walk you decide on at 2pm needs a control you can reach. The tray also unblocked Phase 4's day-type override, which had working accounting and no way to be invoked. Menu clicks arrive on pystray's thread and are queued for the app's tick, the same arrangement the lock overlay uses. Left-click opens the menu via a small subclass remapping `WM_LBUTTONUP`; pinning the icon out of the overflow is a Windows user setting an app cannot control.
+
+**Two bugs found by end-to-end runs, not review:**
+- `emergency_hours_today()` compared a **UTC** grant timestamp against a **local** date. At 20:36 in Toronto it is already tomorrow in UTC, so a grant just made did not raise today's cap. It would have worked every morning and failed every evening.
+- `pady=(18, 4)` is valid for `pack()` but not a widget constructor, which takes a single value.
+
+**Still open:** Phase 5 (Focus Mode) is unbuilt; Phase 7's SQLite history log is unbuilt; Phase 8 packaging untouched. Settings apply unevenly by design — caps, walking and calendar values are re-read each tick, while rhythm and lock values are baked in at construction and need a restart, which the app says rather than silently ignoring half an edit.
+
+**Next:** Phase 5 (Focus Mode, docs/SPEC.md §6) or Phase 7's history log. Both are smaller than what has just been built.
 
 ### Session 2 — 2026-08-09
 
