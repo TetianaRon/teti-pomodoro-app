@@ -62,6 +62,13 @@ class AppState:
     custom_skip_used: float = 0.0      # seconds (SPEC §4B)
     worked_today: float = 0.0          # seconds of tracked work
     day_type_override: str | None = None   # WORKING / NON_WORKING / None
+    walked_today: float = 0.0          # seconds on the treadmill (SPEC §7)
+    # Set while a walk is in progress, so an app restart mid-walk doesn't
+    # lose the session. Stored in UTC.
+    walk_started_at: datetime | None = None
+    # Reminder times already shown today, as "HH:MM", so a prompt is not
+    # repeated every tick once its minute arrives.
+    walk_prompts_done: tuple[str, ...] = field(default=())
     # --- rolling ---
     emergency_grants: tuple[Grant, ...] = field(default=())
     override_raises: tuple[date, ...] = field(default=())
@@ -83,6 +90,9 @@ class AppState:
             day=today,
             emergency_grants=self.emergency_grants,
             override_raises=self.override_raises,
+            # A walk running across midnight keeps running; stopping it
+            # silently would lose the time actually spent.
+            walk_started_at=self.walk_started_at,
         )
 
     # -- custom skip budget (SPEC §4B) --------------------------------
@@ -103,6 +113,39 @@ class AppState:
         if seconds <= 0:
             return self
         return replace(self, worked_today=self.worked_today + seconds)
+
+    # -- walking (SPEC §7) --------------------------------------------
+
+    @property
+    def walking(self) -> bool:
+        return self.walk_started_at is not None
+
+    def walked_including_current(self, now: datetime | None = None) -> float:
+        """Total walked today, counting a walk still in progress."""
+        if self.walk_started_at is None:
+            return self.walked_today
+        elapsed = ((now or _now()) - self.walk_started_at).total_seconds()
+        return self.walked_today + max(0.0, elapsed)
+
+    def start_walk(self, now: datetime | None = None) -> "AppState":
+        if self.walking:
+            return self
+        return replace(self, walk_started_at=now or _now())
+
+    def stop_walk(self, now: datetime | None = None) -> "AppState":
+        if self.walk_started_at is None:
+            return self
+        elapsed = ((now or _now()) - self.walk_started_at).total_seconds()
+        return replace(
+            self,
+            walked_today=self.walked_today + max(0.0, elapsed),
+            walk_started_at=None,
+        )
+
+    def with_prompt_shown(self, label: str) -> "AppState":
+        if label in self.walk_prompts_done:
+            return self
+        return replace(self, walk_prompts_done=self.walk_prompts_done + (label,))
 
     # -- Emergency Mode (SPEC §5) -------------------------------------
 
@@ -181,6 +224,11 @@ class AppState:
             "custom_skip_used_seconds": self.custom_skip_used,
             "worked_today_seconds": self.worked_today,
             "day_type_override": self.day_type_override,
+            "walked_today_seconds": self.walked_today,
+            "walk_started_at": (
+                self.walk_started_at.isoformat() if self.walk_started_at else None
+            ),
+            "walk_prompts_done": list(self.walk_prompts_done),
             "emergency_grants": [
                 {"at": g.at.isoformat(), "hours": g.hours}
                 for g in self.emergency_grants
@@ -203,6 +251,12 @@ class AppState:
             custom_skip_used=_seconds(data, "custom_skip_used_seconds"),
             worked_today=_seconds(data, "worked_today_seconds"),
             day_type_override=_override(data.get("day_type_override")),
+            walked_today=_seconds(data, "walked_today_seconds"),
+            walk_started_at=_moment(data.get("walk_started_at")),
+            walk_prompts_done=tuple(
+                str(x) for x in data.get("walk_prompts_done", [])
+                if isinstance(x, str)
+            ),
             emergency_grants=grants,
             override_raises=raises,
         )
@@ -219,6 +273,17 @@ def _seconds(data: dict, key: str) -> float:
 
 def _override(value) -> str | None:
     return value if value in (WORKING, NON_WORKING) else None
+
+
+def _moment(value) -> datetime | None:
+    """A stored timestamp, or None if it is missing or unparseable."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _grants(raw):

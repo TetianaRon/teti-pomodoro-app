@@ -64,8 +64,11 @@ class Settings:
     focus_max_hours: float = 2.0
     focus_uses_per_day: int = 1
 
-    # Phase 6 — walking goal (docs/SPEC.md §7), in minutes.
+    # Walking goal (docs/SPEC.md §7), in minutes.
     walking_target_minutes: float = 60.0
+    # When to ask. Tracking is a manual toggle, so the app's job is to
+    # prompt at sensible moments rather than to detect anything.
+    walking_reminder_times: tuple[str, ...] = ("11:40", "15:20")
 
     # -- serialisation ------------------------------------------------
 
@@ -105,7 +108,10 @@ class Settings:
                 "max_hours": self.focus_max_hours,
                 "uses_per_day": self.focus_uses_per_day,
             },
-            "walking": {"target_minutes": self.walking_target_minutes},
+            "walking": {
+                "target_minutes": self.walking_target_minutes,
+                "reminder_times": list(self.walking_reminder_times),
+            },
         }
 
     @classmethod
@@ -176,12 +182,24 @@ class Settings:
                 _num(focus, "uses_per_day", base.focus_uses_per_day)),
             walking_target_minutes=_num(
                 walking, "target_minutes", base.walking_target_minutes),
+            walking_reminder_times=_times(
+                walking.get("reminder_times"), base.walking_reminder_times),
         )
 
 
 def _section(data: dict, name: str) -> dict:
     value = data.get(name)
     return value if isinstance(value, dict) else {}
+
+
+def _times(raw, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """Reminder times, keeping the defaults if the list is unusable."""
+    from .walking import parse_times
+
+    if not isinstance(raw, list):
+        return fallback
+    parsed = parse_times(raw)
+    return tuple(parsed) if parsed else ()
 
 
 def _num(section: dict, key: str, fallback: float) -> float:

@@ -84,16 +84,24 @@ class CapStatus:
     base_hours: float
     emergency_hours: float
     worked_seconds: float
+    walked_seconds: float = 0.0
+    walking_target_seconds: float = 0.0
+
+    @property
+    def walking_shortfall_seconds(self) -> float:
+        """How much cap the walking goal is currently costing (SPEC §7).
+
+        `max(0, target − walked)`, recalculated live: every minute walked
+        raises the ceiling back minute for minute, so going for a walk
+        un-blocks you the same day rather than tomorrow.
+        """
+        return max(0.0, self.walking_target_seconds - self.walked_seconds)
 
     @property
     def effective_seconds(self) -> float:
-        """The cap actually in force, Emergency Mode included.
-
-        SPEC §7's walking shortfall also feeds in here, but walking is
-        Phase 6 and nothing tracks it yet — subtracting a full hour for an
-        untracked goal would cut every day short for no reason.
-        """
-        return (self.base_hours + self.emergency_hours) * HOUR
+        """The cap actually in force: base − walking shortfall + emergency."""
+        base = self.base_hours * HOUR - self.walking_shortfall_seconds
+        return max(0.0, base) + self.emergency_hours * HOUR
 
     @property
     def remaining_seconds(self) -> float:
@@ -115,6 +123,9 @@ class CapStatus:
             if self.emergency_hours
             else ""
         )
+        shortfall = self.walking_shortfall_seconds
+        if shortfall:
+            extra += f" (−{shortfall / 60:.0f} min unwalked)"
         if self.over:
             return (
                 f"{worked:.1f}h worked — {self.overtime_seconds / HOUR:.1f}h "
@@ -128,6 +139,7 @@ def status(
     day_type: DayType,
     working_day_hours: float,
     non_working_day_hours: float,
+    walking_target_minutes: float = 0.0,
 ) -> CapStatus:
     """Combine the day's classification with what has been worked so far."""
     base = working_day_hours if day_type.working else non_working_day_hours
@@ -136,4 +148,6 @@ def status(
         base_hours=base,
         emergency_hours=state.emergency_hours_today(),
         worked_seconds=state.worked_today,
+        walked_seconds=state.walked_including_current(),
+        walking_target_seconds=walking_target_minutes * 60,
     )

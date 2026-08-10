@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-from datetime import date
+from datetime import date, datetime
 
 from . import caps
 from . import settings as settings_module
@@ -28,6 +28,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
+from . import walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -87,6 +88,11 @@ class Application:
             on_emergency=self._take_emergency,
         )
         self.banner = WarningBanner(self._root, config)
+        self.walk_prompt = walking.WalkPrompt(
+            self._root,
+            on_start=self._start_walk,
+            on_stop=self._stop_walk,
+        )
 
     # -- custom skip (SPEC §4B) ---------------------------------------
 
@@ -141,6 +147,50 @@ class Application:
             f"({left:.0f}h of weekly budget left)"
         )
 
+    # -- walking (SPEC §7) --------------------------------------------
+
+    def _start_walk(self) -> None:
+        self._state = self._state.start_walk()
+        self._save_state()
+        self._log("walking started")
+
+    def _stop_walk(self) -> None:
+        before = self._state.walked_today
+        self._state = self._state.stop_walk()
+        self._save_state()
+        minutes = (self._state.walked_today - before) / 60
+        total = self._state.walked_today / 60
+        target = self.settings.walking_target_minutes
+        self._log(
+            f"walking stopped — {minutes:.0f} min "
+            f"({total:.0f} of {target:.0f} min today)"
+        )
+        if total >= target:
+            self.walk_prompt.hide()
+
+    def _update_walking(self) -> None:
+        """Prompt at the configured times, and keep the window current."""
+        if self.dry_run:
+            return
+        now = datetime.now().time()
+        due = walking.due_prompt(
+            now,
+            list(self.settings.walking_reminder_times),
+            self._state.walk_prompts_done,
+        )
+        if due is not None:
+            self._state = self._state.with_prompt_shown(due)
+            self._save_state()
+            self._log(f"walking reminder ({due})")
+            self.walk_prompt.show("Time to walk")
+
+        if self.walk_prompt.visible:
+            self.walk_prompt.update(
+                walking=self._state.walking,
+                walked_seconds=self._state.walked_including_current(),
+                target_seconds=self.settings.walking_target_minutes * 60,
+            )
+
     def _update_cap(self) -> None:
         """Recompute where the day stands, and shorten intervals if over."""
         today = date.today()
@@ -160,6 +210,7 @@ class Application:
             day_type,
             self.settings.working_day_cap_hours,
             self.settings.non_working_day_cap_hours,
+            self.settings.walking_target_minutes,
         )
         # Past the cap the work interval shortens, so breaks become a
         # standing nudge rather than the app switching itself off.
@@ -233,6 +284,7 @@ class Application:
         # suppression, so it goes first no matter how we got here.
         self.overlay.release()
         self.banner.hide()
+        self.walk_prompt.hide()
         self.monitor.stop()
         if self.watcher is not None:
             self.watcher.stop()
@@ -250,6 +302,7 @@ class Application:
         )
         snapshot = self.engine.snapshot()
         self._record_work(now)
+        self._update_walking()
         self._update_cap()
         notice = self._watch_long_exclusion(now, exclusion.active)
         if notice is None and self._cap is not None and self._cap.over:
