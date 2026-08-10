@@ -20,6 +20,6 @@ credentials.json
 *.ics
 local/
 
-# Break chimes are personal stock files, not ours to redistribute.
-assets/break-start.*
-assets/break-end.*
+# Break chimes are third-party stock audio, kept out of the repo rather
+# than redistributed. The app finds whatever is in here at runtime.
+assets/sound-effects/

@@ -95,6 +95,16 @@ themselves out of the overflow — that choice is deliberately the user's.
 Logs go to the console when run from a terminal, and to
 `%APPDATA%\PomodoroGuardian\pomodoro.log` when there isn't one.
 
+## Break chimes
+
+Drop `.mp3` or `.wav` files into `assets/sound-effects/` and pick one for the
+start and end of a break in the settings window, each with a Play button to
+check the level. `--test-sounds` lists what it found and plays both.
+
+That folder is gitignored: the clips are third-party stock audio, so the app
+discovers whatever is present rather than depending on particular files. With
+none installed, breaks are simply silent.
+
 **The lock is real** — it covers every monitor and blocks keyboard and mouse.
 Ctrl+Alt+Del still works and always will. While `--no-safety-unlock` is off
 (the default), holding Escape for 3 seconds also releases it; that hatch

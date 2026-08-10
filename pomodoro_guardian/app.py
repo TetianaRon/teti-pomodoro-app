@@ -86,11 +86,14 @@ class Application:
         self._logged_day_type = ""
         # Resolved once: a missing file should be reported at startup, not
         # discovered as silence at the moment a break lands.
+        # Falls back to the first available clip when nothing is chosen, so
+        # dropping files in is enough to get a chime; the startup log names
+        # whichever it picked, so it is never a mystery.
         self._sound_start = sounds.resolve(
-            self.settings.break_start_sound, sounds.DEFAULT_START
+            self.settings.break_start_sound, fallback_first=True
         )
         self._sound_end = sounds.resolve(
-            self.settings.break_end_sound, sounds.DEFAULT_END
+            self.settings.break_end_sound, fallback_first=True
         )
 
         self._root = tk.Tk()
@@ -506,10 +509,13 @@ class Application:
         # Start and stop are recorded so a gap in the log can be told from
         # a crash: a start with no matching stop is the app dying.
         self.history.record(history_module.APP_STARTED)
-        for label, path in (("break start", self._sound_start),
-                            ("break end", self._sound_end)):
-            if path is None:
-                self._log(f"no {label} sound — drop a file in assets/")
+        for what, path in (("break start", self._sound_start),
+                           ("break end", self._sound_end)):
+            self._log(
+                f"{what} chime: {path.name}" if path
+                else f"{what} chime: none — add a file to "
+                     f"assets/{sounds.SOUNDS_DIRNAME}/"
+            )
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
@@ -853,16 +859,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.test_sounds:
         settings = settings_module.load(path)
-        print(f"looking in {sounds.assets_dir()}\n")
-        for label, configured, stem in (
-            ("break start", settings.break_start_sound, sounds.DEFAULT_START),
-            ("break end", settings.break_end_sound, sounds.DEFAULT_END),
+        clips = sounds.available()
+        print(f"{len(clips)} clip(s) in {sounds.sounds_dir()}\n")
+        for clip in clips:
+            print(f"  {sounds.label(clip):32} {clip.name}")
+        print()
+        for what, configured in (
+            ("break start", settings.break_start_sound),
+            ("break end", settings.break_end_sound),
         ):
-            found = sounds.resolve(configured, stem)
+            found = sounds.resolve(configured, fallback_first=True)
             if found is None:
-                print(f"  {label:12}: none found — add {stem}.mp3 to assets/")
+                print(f"  {what:12}: none")
                 continue
-            print(f"  {label:12}: {found.name}  playing…")
+            print(f"  {what:12}: {found.name}  playing…")
             sounds.play(found)
             time.sleep(3.5)
         return 0

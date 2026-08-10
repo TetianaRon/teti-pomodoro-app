@@ -24,33 +24,67 @@ from pathlib import Path
 
 _alias = itertools.count(1)
 
-#: Filenames looked for in assets/ when no explicit path is configured, so
-#: dropping a file in is all that's needed.
-DEFAULT_START = "break-start"
-DEFAULT_END = "break-end"
 EXTENSIONS = (".mp3", ".wav", ".m4a", ".wma")
+
+#: Clips live in their own folder rather than loose among the icons, and
+#: are gitignored: they are third-party stock audio, so the app discovers
+#: whatever is present instead of depending on particular files.
+SOUNDS_DIRNAME = "sound-effects"
+
+NONE_LABEL = "(silent)"
 
 
 def assets_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "assets"
 
 
-def find_default(stem: str) -> Path | None:
-    """The first assets/<stem>.<ext> that exists, or None."""
-    for extension in EXTENSIONS:
-        candidate = assets_dir() / f"{stem}{extension}"
+def sounds_dir() -> Path:
+    return assets_dir() / SOUNDS_DIRNAME
+
+
+def available() -> list[Path]:
+    """Every playable clip in the sounds folder, sorted by name."""
+    folder = sounds_dir()
+    if not folder.is_dir():
+        return []
+    return sorted(
+        (p for p in folder.iterdir()
+         if p.is_file() and p.suffix.lower() in EXTENSIONS),
+        key=lambda p: p.name.lower(),
+    )
+
+
+def label(path: Path) -> str:
+    """A readable name for a dropdown.
+
+    Stock filenames carry an uploader prefix and a numeric id
+    ("universfield-bell-ring-123742"), which is unhelpful in a menu but
+    the only thing tying the file to its source — so the id is dropped for
+    display while the filename itself is what gets stored.
+    """
+    stem = path.stem
+    parts = stem.replace("_", "-").split("-")
+    while parts and parts[-1].isdigit():
+        parts.pop()
+    return " ".join(parts) or stem
+
+
+def resolve(configured: str | None, fallback_first: bool = False) -> Path | None:
+    """Turn a stored setting into a file.
+
+    Accepts a bare filename from the sounds folder or an absolute path
+    elsewhere, so a clip can live outside the repo if preferred.
+    """
+    if configured:
+        candidate = sounds_dir() / configured
         if candidate.is_file():
             return candidate
-    return None
-
-
-def resolve(configured: str | None, stem: str) -> Path | None:
-    """A configured path if it exists, else the bundled default, else None."""
-    if configured:
         path = Path(configured).expanduser()
         if path.is_file():
             return path
-    return find_default(stem)
+        return None
+    clips = available()
+    return clips[0] if (fallback_first and clips) else None
 
 
 def play(path: Path | str | None) -> bool:

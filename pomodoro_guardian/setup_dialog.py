@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 from tkinter import ttk
 
-from . import calendar_feed, settings as settings_module
+from . import calendar_feed, settings as settings_module, sounds
 from .config import MINUTE
 from .settings import Settings
 from .walking import parse_times
@@ -36,6 +36,9 @@ class SetupDialog:
         self._path = path
         self._start = settings
         self._result: Settings | None = None
+        # Populated by _build_sounds; empty when no clips are installed, so
+        # saving still works and simply keeps the setting blank.
+        self._clip_by_label: dict[str, str] = {}
         # A second tk.Tk() in one process misbehaves, so when the app is
         # already running this has to be a child window instead.
         self._owns_root = parent is None
@@ -82,6 +85,10 @@ class SetupDialog:
             "focus_uses": tk.StringVar(value=str(settings.focus_uses_per_day)),
             "walk_times": tk.StringVar(
                 value=", ".join(settings.walking_reminder_times)),
+            "sound_start": tk.StringVar(
+                value=_clip_label(settings.break_start_sound)),
+            "sound_end": tk.StringVar(
+                value=_clip_label(settings.break_end_sound)),
             "working_cap": tk.StringVar(
                 value=_num(settings.working_day_cap_hours)),
             "non_working_cap": tk.StringVar(
@@ -108,6 +115,7 @@ class SetupDialog:
 
         self._build_rhythm(left, 0)
         self._build_breaks(left, 1)
+        self._build_sounds(left, 2)
         self._build_caps(right, 0)
         self._build_focus(right, 1)
         self._build_walking(right, 2)
@@ -194,6 +202,45 @@ class SetupDialog:
                "per month", "raising a day-off cap back to a full day")
         _field(frame, 4, "Breaks past the cap", self._vars["overtime"],
                "minutes", "work interval shortens instead of stopping")
+
+    def _build_sounds(self, parent, row):
+        frame = _section(parent, row, "Chimes")
+        clips = sounds.available()
+        if not clips:
+            ttk.Label(
+                frame,
+                text=("No clips found. Drop .mp3 or .wav files into\n"
+                      f"assets/{sounds.SOUNDS_DIRNAME}/ and reopen this window."),
+                foreground="#555", justify="left",
+            ).grid(row=0, column=0, columnspan=3, sticky="w")
+            return
+
+        # Labels are shown, filenames are stored — the numeric id in a stock
+        # filename is meaningless in a menu but is what ties it to its source.
+        self._clip_by_label = {sounds.NONE_LABEL: ""}
+        for clip in clips:
+            self._clip_by_label[sounds.label(clip)] = clip.name
+        choices = list(self._clip_by_label)
+
+        for index, (text, key) in enumerate(
+            (("Break starts", "sound_start"), ("Break ends", "sound_end"))
+        ):
+            ttk.Label(frame, text=text).grid(row=index, column=0, sticky="w",
+                                             pady=3)
+            ttk.Combobox(
+                frame, textvariable=self._vars[key], values=choices,
+                state="readonly", width=26,
+            ).grid(row=index, column=1, sticky="w", padx=8)
+            ttk.Button(
+                frame, text="Play", width=6,
+                command=lambda k=key: self._play_choice(k),
+            ).grid(row=index, column=2, sticky="w")
+
+    def _play_choice(self, key: str) -> None:
+        """Preview the selected clip, so levels can be judged before a break."""
+        name = self._clip_by_label.get(self._vars[key].get(), "")
+        if name:
+            sounds.play(sounds.sounds_dir() / name)
 
     def _build_focus(self, parent, row):
         frame = _section(parent, row, "Focus Mode")
@@ -315,6 +362,10 @@ class SetupDialog:
             focus_max_hours=focus_hours,
             focus_uses_per_day=focus_uses,
             walking_reminder_times=tuple(walk_times),
+            break_start_sound=self._clip_by_label.get(
+                self._vars["sound_start"].get(), ""),
+            break_end_sound=self._clip_by_label.get(
+                self._vars["sound_end"].get(), ""),
             working_day_cap_hours=working_cap,
             non_working_day_cap_hours=day_off_cap,
             emergency_hours_per_week=emergency,
@@ -368,6 +419,12 @@ def _field(parent, row, label, var, suffix, hint=""):
     text = suffix + (f"   — {hint}" if hint else "")
     ttk.Label(parent, text=text, foreground="#555").grid(
         row=row, column=2, sticky="w")
+
+
+def _clip_label(configured: str) -> str:
+    """The dropdown label for a stored filename, resolving the default."""
+    found = sounds.resolve(configured, fallback_first=not configured)
+    return sounds.label(found) if found else sounds.NONE_LABEL
 
 
 def _mins(seconds: float) -> str:
