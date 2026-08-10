@@ -27,9 +27,8 @@ Freesound — crediting the account name would have credited the wrong person.
 
 ## ⚠️ Before this app is ever published
 
-It is a personal, single-machine app today, and none of this matters at that
-scale. If that changes, two things need doing **before** the repository is made
-public or the app is distributed to anyone.
+The repository **is public**, so the redistribution clause below already
+applies — this is not a future concern. One item is done; one remains.
 
 **1. The clips must not ship as they are.** The Pixabay Content License is
 permissive about *use* — commercial or not, no attribution — but explicit
@@ -47,11 +46,16 @@ their own. The app already treats an empty `assets/sound-effects/` as a
 supported state and simply stays silent, so shipping without any needs no code
 change.
 
-**2. They are in git history.** `assets/sound-effects/` is gitignored now, but
-the five files were committed at the repository root in `e9c2dc6` before that
-rule existed, and pushed. HEAD is clean; history is not. Purging them needs a
-history rewrite and a force-push, which is why it has been left for a private
-personal repo — but it has to happen before the repo becomes public.
+**2. History is clean, and needs to stay that way.** The five files were once
+committed at the repository root, before the ignore rule existed, and pushed to
+a **public** repo — so they were being distributed for a while. They were
+purged with `git-filter-repo` on 2026-08-10 and the history force-pushed; no
+mp3 object remains in any commit. `assets/sound-effects/` is gitignored, which
+is what keeps it that way.
+
+The lesson worth keeping: `git add -A` in a repo where new binary files have
+appeared will commit them, and on a public repo that is publication. Check
+`git status` before staging anything wholesale.
 
 ## Everything else
 
