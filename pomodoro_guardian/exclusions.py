@@ -5,15 +5,20 @@ an endless list that breaks whenever a new tool appears or an old one
 renames its binary, and a running app says nothing about whether a call is
 actually in progress.
 
-Instead this reads the two signals Windows already maintains:
+Instead this reads the signal Windows already maintains:
+**CapabilityAccessManager's ConsentStore** — the registry keys behind the
+camera/microphone privacy indicator in the tray. Any app currently holding
+a device has `LastUsedTimeStop = 0`. This is authoritative, cheap to read,
+and works for apps that don't exist yet.
 
-* **CapabilityAccessManager's ConsentStore** — the registry keys behind the
-  camera/microphone privacy indicator in the tray. Any app currently
-  holding a device has `LastUsedTimeStop = 0`. This is authoritative, cheap
-  to read, and works for apps that don't exist yet.
-* **SHQueryUserNotificationState** — the API Windows itself uses to decide
-  whether it's rude to pop a notification. Presenting and full-screen
-  states are precisely "don't interrupt me", which is the same question.
+**A presenting check via `SHQueryUserNotificationState` was tried and
+removed (2026-08-10).** Only `QUNS_PRESENTATION_MODE` was ever narrow
+enough to trust, and that means a Vista-era Mobility Center setting the
+contributor had never switched on — while the broader states held breaks
+off for *any* full-screen window, this app's own lock included. In
+practice screen sharing accompanies a call, so the microphone already
+catches it; a scheduled presentation is caught by the calendar skip
+(§4A); and presenting in person is what Focus Mode (§6) is for.
 
 The calendar-driven meeting skip described in SPEC §4 is Phase 3 and lives
 elsewhere; this module only knows about what the machine is doing now.
@@ -31,20 +36,9 @@ CONSENT_STORE = (
     r"\CapabilityAccessManager\ConsentStore"
 )
 
-# SHQueryUserNotificationState return values (shellapi.h QUERY_USER_NOTIFICATION_STATE).
-QUNS_NOT_PRESENT = 1
-QUNS_BUSY = 2
-QUNS_RUNNING_D3D_FULL_SCREEN = 3
-QUNS_PRESENTATION_MODE = 4
-QUNS_ACCEPTS_NOTIFICATIONS = 5
-QUNS_QUIET_TIME = 6
-QUNS_APP = 7
-
-
 class Reason(Enum):
     CAMERA = "camera in use"
     MICROPHONE = "microphone in use"
-    PRESENTING = "presenting"
     # SPEC §4A. The calendar meeting skip is an exclusion rather than a
     # separate mechanism: §3 and §4A both mean "do not lock right now", and
     # duplicating the freezing logic would be two things to keep in step.
@@ -146,17 +140,11 @@ class FakeDetector:
 
 
 class WindowsDetector:
-    """The real thing: registry device use plus the notification state."""
+    """The real thing: which apps are holding the camera or microphone."""
 
-    def __init__(
-        self,
-        camera: bool = True,
-        microphone: bool = True,
-        presenting: bool = True,
-    ) -> None:
+    def __init__(self, camera: bool = True, microphone: bool = True) -> None:
         self._camera = camera
         self._microphone = microphone
-        self._presenting = presenting
 
     def check(self) -> Exclusion:
         reasons: list[Reason] = []
@@ -172,9 +160,6 @@ class WindowsDetector:
             if users:
                 reasons.append(Reason.MICROPHONE)
                 details.append(_join(users))
-        if self._presenting and presenting_now():
-            reasons.append(Reason.PRESENTING)
-
         return Exclusion(tuple(reasons), "; ".join(d for d in details if d))
 
 
@@ -240,46 +225,10 @@ def friendly_name(key_name: str) -> str:
     return key_name.split("_")[0]
 
 
-def presenting_now() -> bool:
-    """True when Windows presentation settings are switched on.
-
-    **Only `QUNS_PRESENTATION_MODE` counts**, which means the user has
-    explicitly told Windows they are presenting. Everything else is too
-    broad to trust:
-
-    * `QUNS_BUSY` is documented as "a full-screen application is running
-      *or* presentation settings are applied" — so any full-screen window
-      trips it, very possibly this app's own lock overlay. Measured on the
-      real machine it fired three times in eight seconds while nothing was
-      being presented, silently holding breaks off each time.
-    * `RUNNING_D3D_FULL_SCREEN` is a game and `QUNS_APP` an ordinary
-      full-screen app. Neither is work, and a maximised video player must
-      never be able to hold breaks off all evening.
-
-    Screen sharing without presentation mode is still caught, because
-    sharing a screen essentially always accompanies a call — and the
-    camera/microphone signals detect that far more reliably.
-    """
-    if not sys.platform.startswith("win"):
-        return False
-    try:
-        import ctypes
-
-        state = ctypes.c_int()
-        result = ctypes.windll.shell32.SHQueryUserNotificationState(
-            ctypes.byref(state)
-        )
-        if result != 0:  # not S_OK
-            return False
-        return state.value == QUNS_PRESENTATION_MODE
-    except (OSError, AttributeError):  # pragma: no cover - API unavailable
-        return False
-
-
 def create_detector(
-    camera: bool = True, microphone: bool = True, presenting: bool = True
+    camera: bool = True, microphone: bool = True
 ) -> Detector:
     """The right detector for this machine."""
     if not sys.platform.startswith("win"):
         return NullDetector()
-    return WindowsDetector(camera, microphone, presenting)
+    return WindowsDetector(camera, microphone)

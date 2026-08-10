@@ -19,7 +19,7 @@ You work long, unbroken stretches — including late evenings and nights — at 
 
 | Setting | Default | What it governs |
 | --- | --- | --- |
-| `input_gap` | 30 s | How long a pause in typing still counts as "at the desk". Bridged gaps are credited as work once you resume; silence beyond this never is. |
+| `input_gap` | 90 s | How long a pause still counts as "at the desk" — keyboard *and* mouse movement. Raised from 30 s on 2026-08-10: reading a long message is work, and at 30 s the clock stopped partway through, so reading-heavy days under-counted and breaks arrived late. |
 | `start_threshold` | 1 min | Span of sustained input needed to auto-start a session. Measured between first and last keystroke, so the grace period above can't satisfy it on its own. |
 | `warning_lead` | 2 min | How far ahead of the lock the warning appears. |
 | `idle_pause_after` | 2 min | When the session is shown as paused. Accrual has already stopped at the last keystroke; this is the user-visible signal. |
@@ -53,8 +53,7 @@ The lock blocks keyboard and mouse but deliberately **not Ctrl+Alt+Del** — blo
 ## 3. Never-interrupt exclusions
 
 The lock will not trigger — and an in-progress countdown pauses — while:
-- A video call is active (auto-detected: Zoom/Teams/Meet etc. running with camera/mic in use, or the app in focus).
-- Screen sharing / presenting is active.
+- A video call is active (auto-detected: any app holding the camera or microphone).
 - A calendar meeting is currently in progress (see §4 — this is the "meeting skip").
 
 These are automatic; you don't have to invoke anything for them.
@@ -62,17 +61,24 @@ These are automatic; you don't have to invoke anything for them.
 **How it is detected (built 2026-08-09, Phase 2).** Deliberately *not* by
 process name. Maintaining a list of conferencing executables breaks whenever a
 tool is added or renamed, and a running app says nothing about whether a call
-is actually happening. Two signals Windows already maintains are used instead:
+is actually happening. One signal Windows already maintains is used instead:
 
 - **CapabilityAccessManager's ConsentStore** — the registry keys behind the
   camera/microphone privacy indicator in the tray. An app currently holding a
   device has `LastUsedTimeStop = 0`; that zero is the whole signal. It is
   authoritative, cheap to read, and works for tools that don't exist yet.
-- **`SHQueryUserNotificationState`** — the API Windows itself uses to decide
-  whether it would be rude to show a notification. Only `QUNS_PRESENTATION_MODE`
-  and `QUNS_BUSY` count. Games (`RUNNING_D3D_FULL_SCREEN`) and ordinary
-  full-screen apps deliberately do not: a maximised video player must not be
-  able to hold breaks off all evening, and it isn't work anyway.
+**A presenting check was tried and removed (2026-08-10.)** It read
+`SHQueryUserNotificationState`, whose `QUNS_BUSY` state means "a full-screen
+application is running *or* presentation settings are applied" — so any
+full-screen window tripped it, this app's own lock overlay included. The
+history log caught it firing three times in eight seconds with nothing being
+presented, silently holding breaks off. Narrowing it to
+`QUNS_PRESENTATION_MODE` alone left it responding only to a Vista-era
+Mobility Center setting that had never been switched on.
+
+It is redundant in any case: screen sharing accompanies a call, so the
+microphone catches it; a scheduled presentation is caught by the calendar
+skip (§4A); and presenting in person is what Focus Mode (§6) is for.
 
 Verified against the real machine's registry, which had usage history for
 Slack, Chrome, Zoom, Loom, the Camera app and Premiere — covering both

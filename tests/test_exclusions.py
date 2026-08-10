@@ -224,7 +224,7 @@ def test_multiple_reasons_are_all_reported():
     assert "camera" in described and "microphone" in described
 
 
-def _patch_devices(monkeypatch, *, webcam=(), microphone=(), presenting=False):
+def _patch_devices(monkeypatch, *, webcam=(), microphone=()):
     from pomodoro_guardian import exclusions
 
     monkeypatch.setattr(
@@ -232,7 +232,6 @@ def _patch_devices(monkeypatch, *, webcam=(), microphone=(), presenting=False):
         "devices_in_use",
         lambda store: list(webcam if store == "webcam" else microphone),
     )
-    monkeypatch.setattr(exclusions, "presenting_now", lambda: presenting)
     return exclusions
 
 
@@ -275,21 +274,24 @@ def test_windows_detector_is_clear_when_nothing_holds_a_device(monkeypatch):
     assert not exclusions.WindowsDetector().check().active
 
 
-def test_presenting_alone_is_enough_to_exclude(monkeypatch):
-    exclusions = _patch_devices(monkeypatch, presenting=True)
-    result = exclusions.WindowsDetector().check()
+def test_a_full_screen_window_no_longer_holds_breaks_off(monkeypatch):
+    """The presenting check is gone (2026-08-10).
 
-    assert result.reasons == (Reason.PRESENTING,)
+    It read QUNS_BUSY, which means "a full-screen application is running
+    *or* presentation settings are applied" — so any full-screen window
+    tripped it, this app's own lock overlay included. The real log showed
+    it firing three times in eight seconds with nothing being presented.
+    Calls are caught by the microphone, scheduled ones by the calendar.
+    """
+    exclusions = _patch_devices(monkeypatch)
+    assert not exclusions.WindowsDetector().check().active
 
 
 def test_disabled_signals_are_not_consulted(monkeypatch):
     exclusions = _patch_devices(
         monkeypatch, webcam=["chrome.exe"], microphone=["Zoom.exe"],
-        presenting=True,
     )
-    detector = exclusions.WindowsDetector(
-        camera=False, microphone=False, presenting=False
-    )
+    detector = exclusions.WindowsDetector(camera=False, microphone=False)
 
     assert not detector.check().active
 

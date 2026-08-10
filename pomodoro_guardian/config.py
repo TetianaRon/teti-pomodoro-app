@@ -57,12 +57,11 @@ class Config:
     custom_skip_daily_budget: float = 60 * MINUTE
 
     # --- Never-interrupt exclusions (SPEC §3) ---
-    # Which signals hold a break off. Camera and microphone are read from
-    # the registry keys behind Windows' own privacy indicator; presenting
-    # comes from SHQueryUserNotificationState.
+    # Which signals hold a break off, read from the registry keys behind
+    # Windows' own camera/microphone privacy indicator. A presenting check
+    # was tried and removed — see exclusions.py.
     exclude_on_camera: bool = True
     exclude_on_microphone: bool = True
-    exclude_on_presenting: bool = True
     # A break held off this long without a break is worth saying out loud —
     # usually an app holding the mic open rather than a real six-hour call.
     # Only warns; it does not override the exclusion.

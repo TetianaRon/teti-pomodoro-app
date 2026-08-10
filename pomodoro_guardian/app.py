@@ -59,7 +59,6 @@ class Application:
             else create_detector(
                 camera=config.exclude_on_camera,
                 microphone=config.exclude_on_microphone,
-                presenting=config.exclude_on_presenting,
             )
         )
         # The calendar meeting skip (SPEC §4A) is just another exclusion —
@@ -746,17 +745,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def report_exclusions(config: Config, settings) -> int:
     """`--exclusions`: say what is holding breaks off right now, and why."""
-    from .exclusions import devices_in_use, presenting_now
+    from .exclusions import devices_in_use
 
     detector = create_detector(
         camera=config.exclude_on_camera,
         microphone=config.exclude_on_microphone,
-        presenting=config.exclude_on_presenting,
     )
     print("Never-interrupt exclusions (SPEC §3, §4A)\n")
     print(f"  camera in use by  : {_or_none(devices_in_use('webcam'))}")
     print(f"  microphone in use : {_or_none(devices_in_use('microphone'))}")
-    print(f"  presenting        : {presenting_now()}")
 
     watcher = CalendarWatcher(
         settings.calendar_url,
@@ -814,12 +811,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     path = args.config or settings_module.default_path()
 
-    # No console means the log has nowhere to go — true of a packaged
-    # build and, more importantly, of the Startup shortcut, which is when
-    # nobody is watching a terminal anyway.
-    if runtime.frozen() or not runtime.has_console():
-        runtime.redirect_output()
-
+    # One-shot commands run before anything else: they are read-only, so
+    # they must not be refused by the single-instance guard while the app
+    # is running, and their output belongs on the terminal rather than in
+    # the log file. Both of those were briefly wrong.
     if args.history is not None or args.events is not None:
         log = history_module.History(history_module.history_path(path))
         if not log.enabled:
@@ -845,6 +840,17 @@ def main(argv: list[str] | None = None) -> int:
             ok = runtime.create_shortcut(path)
             print(f"{name:11}: {'created' if ok else 'FAILED'}  {path}")
         return 0
+
+    if args.exclusions:
+        loaded = settings_module.load(path)
+        return report_exclusions(loaded.config, loaded)
+
+    # Only now, for the run that actually starts the app: without a
+    # console the log has nowhere to go, which is true of a packaged build
+    # and of the Startup shortcut — exactly when nobody is watching a
+    # terminal anyway.
+    if runtime.frozen() or not runtime.has_console():
+        runtime.redirect_output()
 
     # Two copies would each install a global input hook and fight over the
     # lock overlay — the worst thing to get wrong in this app.
@@ -874,8 +880,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     config = settings.config
-    if args.exclusions:
-        return report_exclusions(config, settings)
     if args.demo:
         config = config.scaled(args.demo)
     if args.no_safety_unlock:
