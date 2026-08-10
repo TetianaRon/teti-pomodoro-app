@@ -241,12 +241,24 @@ def friendly_name(key_name: str) -> str:
 
 
 def presenting_now() -> bool:
-    """True when Windows itself considers this a bad moment to interrupt.
+    """True when Windows presentation settings are switched on.
 
-    Only presentation mode and the busy/full-screen state count. Games
-    (`RUNNING_D3D_FULL_SCREEN`) and ordinary full-screen apps deliberately
-    do not: a maximised video player should never be able to hold breaks
-    off indefinitely, and neither is work anyway.
+    **Only `QUNS_PRESENTATION_MODE` counts**, which means the user has
+    explicitly told Windows they are presenting. Everything else is too
+    broad to trust:
+
+    * `QUNS_BUSY` is documented as "a full-screen application is running
+      *or* presentation settings are applied" — so any full-screen window
+      trips it, very possibly this app's own lock overlay. Measured on the
+      real machine it fired three times in eight seconds while nothing was
+      being presented, silently holding breaks off each time.
+    * `RUNNING_D3D_FULL_SCREEN` is a game and `QUNS_APP` an ordinary
+      full-screen app. Neither is work, and a maximised video player must
+      never be able to hold breaks off all evening.
+
+    Screen sharing without presentation mode is still caught, because
+    sharing a screen essentially always accompanies a call — and the
+    camera/microphone signals detect that far more reliably.
     """
     if not sys.platform.startswith("win"):
         return False
@@ -259,7 +271,7 @@ def presenting_now() -> bool:
         )
         if result != 0:  # not S_OK
             return False
-        return state.value in (QUNS_BUSY, QUNS_PRESENTATION_MODE)
+        return state.value == QUNS_PRESENTATION_MODE
     except (OSError, AttributeError):  # pragma: no cover - API unavailable
         return False
 

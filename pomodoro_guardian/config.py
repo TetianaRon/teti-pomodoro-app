@@ -69,10 +69,14 @@ class Config:
     exclusion_warn_after: float = 2 * 60 * MINUTE
 
     # --- Detection (SPEC §2.1) ---
-    # Input is "active" if the last keystroke/click was this recent. Bridges
-    # the ordinary gaps in real typing so reading a paragraph mid-sentence
-    # doesn't read as stepping away.
-    input_gap: float = 30.0
+    # How long a pause still counts as being at the desk. Covers keyboard
+    # *and* mouse movement — Windows' GetLastInputInfo updates on either.
+    #
+    # 90s rather than the original 30s: reading a long message or thinking
+    # through a problem is work, and at 30s the clock stopped partway
+    # through, so reading-heavy days under-counted and breaks arrived late.
+    # Still short enough that leaving the desk registers as leaving.
+    input_gap: float = 90.0
     # Sustained activity needed to auto-start a tracked work session.
     start_threshold: float = 1 * MINUTE
 
