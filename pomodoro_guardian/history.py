@@ -39,6 +39,11 @@ APP_STARTED = "app_started"
 APP_STOPPED = "app_stopped"
 BREAK_TAKEN = "break_taken"
 BREAK_SKIPPED = "break_skipped"
+# Why a long break did or did not arrive. Recorded because the count towards
+# it is the one piece of app state with no visible trace of its own: a long
+# break that never fires looks identical to one that was never due.
+CYCLES_RESET = "cycles_reset"
+CYCLES_RESUMED = "cycles_resumed"
 EXCLUDED = "excluded"
 EMERGENCY_USED = "emergency_used"
 FOCUS_STARTED = "focus_started"

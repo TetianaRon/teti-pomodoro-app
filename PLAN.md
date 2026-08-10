@@ -17,14 +17,15 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 235 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 255 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
-no build step.
+no build step. No skill is required to work on this project — see `CLAUDE.md`'s
+session practices.
 
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 235 tests
+.venv\Scripts\python.exe -m pytest tests                 # 255 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--history [DAYS]`,
@@ -66,6 +67,11 @@ afterwards.
   Chrome. Three bugs trace to that. Auto-pausing is now off by default and the
   lock offers `M` instead — do not reintroduce automatic firing without
   re-reading docs/SPEC.md §2.3.
+- **A dev `Application` will write to the live `history.db` and `state.json`
+  unless you point it elsewhere.** Pass *both* `state_file` and `settings_file`
+  at a scratch directory and assert `app.history.path` is inside it before
+  ticking. A test run once put a zeroed snapshot into a real working day, which
+  made the day's walking total read 0 min. See `ISSUES.md`.
 - **Never call tkinter from a non-UI thread.** pynput listeners and pystray
   both run on their own threads and post to a queue the tick drains.
   `root.after()` from a listener raises "main thread is not in main loop".
@@ -122,6 +128,67 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### Session close — 2026-08-10 (second sitting: the rhythm survives a restart)
+
+**Reported from live use:** the app was quit and relaunched repeatedly through
+the day to pick up new features, and the timer restarted from scratch every
+time — including the count towards the 4th-cycle long break. Over a full
+working day of 10 tracked breaks, **the long break never fired once**.
+
+**Why it hid.** Every existing test drives one engine from start to finish, so
+nothing exercised the one thing real use does constantly: rebuilding the engine.
+And the symptom is silent by construction — a long break that never arrives is
+indistinguishable from one that was not due yet. It took a day of using the app
+to notice, which is the pattern the last session already flagged.
+
+**What was built.** The cycle count and the part-finished interval now persist
+in `state.json` (schema 2 → 3, old files load unchanged) and are reloaded at
+launch. `timer.py` gained a `Position` pair with `position()`/`resume()`;
+`state.py` gained `with_position()`/`resumable_position()`. Four rules keep a
+restored position honest — see docs/SPEC.md §2.2:
+
+- It ages out on `idle_reset_after`, the same 60-minute gap that discards a
+  position mid-run, so quitting for the evening doesn't hand the morning three
+  free cycles. The stamp records when the position was last *true*, not last
+  written — otherwise an idle hour before quitting would refresh it.
+- The part-interval is **credit, not a running session**: a saved file can't say
+  you're at the desk, so it's paid in only after `start_threshold` sees real
+  work, and it expires on the same idle gap.
+- A break in progress is not resumed — no lock at launch.
+- Only timing is restored; hours worked are never re-credited.
+
+**Two things made visible**, since the count had no trace of its own: the tray
+now says "12 min to a **long** break", and `--events` records `cycles_resumed`
+and `cycles_reset`.
+
+**A second bug found by testing the first.** Verifying it meant building a real
+`Application` against a scratch `state.json` — and it wrote to the **live**
+`history.db` anyway, because `Application` hardcoded the default settings path
+and ignored `--config`. Three rows landed in a real working day, one of them a
+`{"worked": 0, "walked": 0}` snapshot that made today's walking read 0 min under
+the last-row-wins rule. Rows deleted by id after review, `--history` confirmed
+back to 4.8h / 69 min, and `--config` now moves the whole data directory
+(`report_exclusions` had the same split). Logged in `ISSUES.md`, including the
+guardrail that isn't automated yet: assert a dev `Application`'s history and
+state paths are inside a scratch directory *before* constructing it.
+
+**Housekeeping:** the `laivly-global-session` hard gate is gone. It was never
+installed on this machine, so two sessions in a row hit an unsatisfiable gate on
+their first move; the practices it governed are now written out in `CLAUDE.md`
+and this project requires no skill.
+
+**Verified:** 255 tests (16 new in `tests/test_resume.py`, including the
+reported bug end to end — four launch/quit cycles, asserting the 4th break is
+the long one), pyflakes clean, the live schema-2 state file confirmed to load
+under schema 3, and a scripted `Application` launch showing
+`resuming a previous run — cycle 4 of 4, 20 min into the interval` followed by
+`2 min to a long break` in the tray.
+
+**Next:** restart the app to pick this up — the first launch after it has no
+saved position, so it starts at cycle 1 and the first long break is four
+intervals away. After that, `--events` will show `cycles_resumed` on every
+relaunch.
 
 ### Session 3 — 2026-08-09
 

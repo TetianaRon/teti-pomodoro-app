@@ -11,23 +11,31 @@ Newest first.
 
 ## Open
 
-### 2026-08-09 — `laivly-global-session` unavailable in native Claude Code
-`CLAUDE.md` declares this skill a **hard gate** ("load it before engaging
-with task content"), but it is not installed on this machine — absent from
-the session's skill registry, with no `~/.claude/skills/` or
-`.claude/skills/` directory anywhere. It appears to have been a
-Cowork-side skill that a native Claude Code session cannot see, so the
-gate is unsatisfiable exactly where the app code has to be written.
+### 2026-08-10 — A dev run wrote into the live history log
+Verifying the cycle-resume work meant building a real `Application` against
+a scratch `state.json`. It picked up the scratch state as instructed and
+then opened the **live** `history.db` anyway, because
+`Application.__init__` hardcoded `settings_module.default_path()` and
+ignored both `state_file` and `--config`. Three rows landed in a real
+working day: a `cycles_resumed`, an `app_stopped` that never happened, and
+a `snapshot` of `{"worked": 0, "walked": 0}`.
 
-Session 3 proceeded with contributor approval, following the skill's
-practices as already documented in `CLAUDE.md` and
-`pomo-task-build-phase.md` §3/§6 (plan maintenance, post-write
-verification, out-of-scope declaration, wrap-up format).
+The zeroed snapshot was the damaging one. `History.summary()` resolves
+`walked` as last-row-wins, so today's walking total read **0 min** until
+the running app wrote its next real snapshot five minutes later — the exact
+class of silent accounting error the log exists to catch, introduced by the
+tooling meant to check it. All three rows were deleted by id after being
+printed for review, and `--history 1` was confirmed back to 4.8h / 69 min.
 
-**Fix options:** install the skill to `~/.claude/skills/`, or inline the
-handful of practices it governs into `CLAUDE.md` and drop the hard-gate
-wording. Until one happens, every native session hits this wall on its
-first move.
+**Fixed in code:** `Application` now takes `settings_file`, so `--config`
+moves the whole data directory rather than half of it; `report_exclusions`
+had the same split and was fixed with it.
+
+**Guardrail, not yet automated:** nothing stops the next dev run from
+pointing at the default paths. Before constructing an `Application` outside
+the test suite, assert its `history.path` and state file are both inside a
+scratch directory — the smoke script in the scratchpad does this now, and
+it is the check that would have caught this before the write, not after.
 
 ### 2026-08-09 — Git commit identity was never written to local config
 The Session 2 bridge run set the commit identity per-command rather than
@@ -55,6 +63,23 @@ the next machine doesn't rediscover this.
 Run tests with: `.venv\Scripts\python.exe -m pytest tests`
 
 ## Resolved
+
+### 2026-08-09 — `laivly-global-session` unavailable in native Claude Code
+`CLAUDE.md` declared this skill a **hard gate** ("load it before engaging
+with task content"), but it is not installed on this machine — absent from
+the session's skill registry, with no `~/.claude/skills/` or
+`.claude/skills/` directory anywhere. It appears to have been a
+Cowork-side skill that a native Claude Code session cannot see, so the
+gate was unsatisfiable exactly where the app code has to be written. Two
+sessions hit it and proceeded with contributor approval.
+
+**Resolved 2026-08-10 by the second of the two fix options** — the
+contributor chose to drop the dependency rather than install the skill. The
+practices it governed (plan maintenance, write verification, out-of-scope
+declaration, wrap-up format) are now written out in `CLAUDE.md` under
+"Session practices", and the two dangling references in
+`pomo-task-build-phase.md` §3/§6 point there instead. **This project now
+requires no skill to work on.**
 
 ### 2026-08-09 — Cowork device-bridge git lock friction
 Every git command run against this repo through the Cowork device bridge

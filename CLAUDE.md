@@ -30,12 +30,26 @@ For anything not covered by a task file — a one-off fix, a design-decision
 change, a session close — work directly from `PLAN.md` / `docs/SPEC.md` and
 this file's behavioral rules; no additional task file is needed for those.
 
-## Skill invocations
+## Session practices
 
-- **`laivly-global-session`** — required, every session. Governs plan
-  maintenance (`PLAN.md`'s worklog and phase status), file-write
-  verification, out-of-scope declaration, and session wrap-up/handoff
-  format. Hard gate: load it before engaging with task content.
+These were previously delegated to a `laivly-global-session` skill, which
+does not exist on this machine — a hard gate no session could satisfy. The
+practices it governed are inlined here instead, and no skill is required to
+work on this project (2026-08-10).
+
+1. **Keep `PLAN.md` current as you go.** Move a phase's status the moment it
+   changes (`⏳` → `🔄` → `✅ complete YYYY-MM-DD`); never leave finished work
+   marked in progress. Add a newest-first `## Session Worklog` entry saying
+   what changed, what was decided, and what is next. If the work invalidates
+   an earlier phase's notes, fix those too rather than leaving the plan
+   half-current.
+2. **Verify every file write landed** before building on it, and re-read
+   anything written through a bridge rather than trusting the write.
+3. **Declare what you did not do.** Out-of-scope findings, skipped checks and
+   anything that needs the contributor's own hardware are stated plainly, not
+   folded silently into a completion claim.
+4. **Close with a handoff** a fresh session can start from: current state,
+   how to run and test it, what is unverified, and the next move.
 
 ## Behavioral rules
 
@@ -59,11 +73,10 @@ files — only move them. If a git command fails with "Unable to create
 an untracked `.git_lock_leftovers/` folder) and retry. This does not affect
 git run natively on this machine outside the bridge.
 
-## Skill candidate (flagged, not yet actioned)
+## Candidate for wider guidance (flagged, not yet actioned)
 
 The device-bridge git-lock workaround above is generic to any Cowork
 project reached through `device_bash` with a git repo — not specific to
-this app. Flagged as a candidate for generalizing into
-`laivly-global-session`'s file-integrity guidance; not yet proposed or
-built. A future PSB Improve pass should evaluate whether to promote it out
-of this project's own instructions.
+this app. Flagged as a candidate for promoting into whatever cross-project
+file-integrity guidance exists; not yet proposed or built. It stays in this
+project's own instructions until then.

@@ -46,6 +46,29 @@ class Event(Enum):
 
 
 @dataclass(frozen=True)
+class Position:
+    """Where the rhythm stands — the part that has to survive a restart.
+
+    The engine is rebuilt from scratch every time the app starts, and
+    nothing used to carry over, so the count towards the 4th-cycle long
+    break restarted with it. On a day of several restarts — routine here,
+    since restarting is how a change gets picked up — the long break
+    therefore never arrived at all (found in live use, 2026-08-10).
+
+    Only the position is carried, not the day's work total: that already
+    lives in `state.json` and must never be re-credited from here.
+    """
+
+    completed_cycles: int = 0
+    interval_elapsed: float = 0.0   # seconds already credited to the interval
+
+    @property
+    def empty(self) -> bool:
+        """Nothing worth restoring — a first run, or a stale position."""
+        return self.completed_cycles <= 0 and self.interval_elapsed <= 0
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """Everything the UI needs, with no access to engine internals."""
 
@@ -103,6 +126,9 @@ class PomodoroEngine:
         # than from the last keystroke: you were at the desk for the call,
         # you just weren't typing.
         self._resume_at: float | None = None
+        # A previous run's part-finished interval, waiting to be paid into
+        # the next session. Held rather than applied at once — see resume().
+        self._resume_elapsed = 0.0
 
     # -- public API ---------------------------------------------------
 
@@ -180,6 +206,34 @@ class PomodoroEngine:
         self._active_since = None
         return Event.BREAK_DEFERRED
 
+    def position(self) -> Position:
+        """The place in the cycle, for persisting across a restart.
+
+        A break in progress is deliberately not part of this. Re-raising a
+        lock at launch would be a hostile way to start, and a break that
+        did not run to the end never counted towards the long one anyway —
+        so quitting mid-break costs that break and nothing else.
+        """
+        elapsed = (
+            self._work_elapsed
+            if self.state in (State.WORK, State.WARNING)
+            else self._resume_elapsed
+        )
+        return Position(self.completed_cycles, elapsed)
+
+    def resume(self, position: Position) -> None:
+        """Adopt a previous run's position (SPEC §2.2).
+
+        The cycle count is taken as read; the part-finished interval is
+        not. A saved file cannot tell the app you are at the desk, so the
+        interval is held as credit and paid into the next session once the
+        usual start threshold has observed real work. The credit then
+        expires on exactly the idle gap that clears the cycle count, so a
+        restart followed by an absence resumes nothing.
+        """
+        self.completed_cycles = max(0, position.completed_cycles)
+        self._resume_elapsed = max(0.0, position.interval_elapsed)
+
     def snapshot(self) -> Snapshot:
         return Snapshot(
             state=self.state,
@@ -234,9 +288,11 @@ class PomodoroEngine:
             return []
 
         # The qualifying stretch was real work, so it counts toward the
-        # first interval rather than being discarded.
+        # first interval rather than being discarded — as does whatever a
+        # previous run had already banked against this same interval.
         self.state = State.WORK
-        self._work_elapsed = span
+        self._work_elapsed = span + self._resume_elapsed
+        self._resume_elapsed = 0.0
         self._credited_through = last_input_at
         self._paused = False
         self._active_since = None
@@ -316,6 +372,10 @@ class PomodoroEngine:
         if idle_for < self.config.idle_reset_after:
             self._cycles_reset_pending = False
             return []
+        # An hour away wipes the whole position, not just the cycle count: a
+        # part-interval carried over from a previous run is no more valid
+        # after that gap than a live one would be.
+        self._resume_elapsed = 0.0
         if self._cycles_reset_pending or self.completed_cycles == 0:
             self._cycles_reset_pending = True
             return []

@@ -27,7 +27,7 @@ One phase per session unless the contributor asks to keep going.
 ## 3. Verify writes
 
 - After every file write, verify it landed correctly before moving on
-  (see `laivly-global-session`'s file-integrity practice).
+  (see `CLAUDE.md`'s session practices).
 - On this repo's mount, prefer a bash heredoc or a Python whole-file write
   over line-based edits for multi-line files, and check byte count
   (`wc -c`) plus a `tail -c N | cat -A` spot check rather than trusting a
@@ -56,8 +56,8 @@ One phase per session unless the contributor asks to keep going.
   YYYY-MM-DD`) immediately when it changes — never leave a completed phase
   marked in progress.
 - Add a `## Session Worklog` entry (newest-first) describing what was
-  built, decisions made, and what's next — per
-  `laivly-global-session`'s plan-maintenance standard.
+  built, decisions made, and what's next — per `CLAUDE.md`'s
+  plan-maintenance practice.
 - If this phase's work affects an earlier, already-completed phase's
   decisions, update that phase's notes too — don't leave the plan
   half-current.

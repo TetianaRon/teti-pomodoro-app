@@ -28,7 +28,7 @@ from pathlib import Path
 
 from .settings import default_path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Day-type override values (SPEC §5a).
 WORKING = "working"
@@ -72,6 +72,15 @@ class AppState:
     # Reminder times already shown today, as "HH:MM", so a prompt is not
     # repeated every tick once its minute arrives.
     walk_prompts_done: tuple[str, ...] = field(default=())
+    # --- the place in the Pomodoro cycle (SPEC §2.2) ---
+    # The engine is built fresh on every launch, so without these the count
+    # towards the 4th-cycle long break restarted with the app. `tracked_at`
+    # is when the two values below were last *true* rather than last
+    # written, which is what lets a stale position be told from a live one.
+    # Stored in UTC.
+    cycles_completed: int = 0
+    interval_elapsed: float = 0.0      # seconds into the unfinished interval
+    tracked_at: datetime | None = None
     # --- rolling ---
     emergency_grants: tuple[Grant, ...] = field(default=())
     override_raises: tuple[date, ...] = field(default=())
@@ -100,6 +109,12 @@ class AppState:
             # two-hour limit ends it soon enough — but the daily use count
             # resets, which is the budget that matters.
             focus_started_at=self.focus_started_at,
+            # The rhythm has no idea what day it is, and an interval worked
+            # up to 23:59 is not finished by the date changing. Staleness is
+            # handled by the age of `tracked_at`, not by the calendar.
+            cycles_completed=self.cycles_completed,
+            interval_elapsed=self.interval_elapsed,
+            tracked_at=self.tracked_at,
         )
 
     # -- custom skip budget (SPEC §4B) --------------------------------
@@ -120,6 +135,46 @@ class AppState:
         if seconds <= 0:
             return self
         return replace(self, worked_today=self.worked_today + seconds)
+
+    # -- the place in the cycle (SPEC §2.2) ---------------------------
+
+    def with_position(
+        self, cycles: int, elapsed: float, now: datetime | None = None
+    ) -> "AppState":
+        """Record where the rhythm stands, stamped with the time.
+
+        Unchanged values leave the stamp alone on purpose. It has to mean
+        "when this was last true", not "when it was last written": the tick
+        runs every second, so refreshing the stamp regardless would make an
+        idle evening look like a position abandoned a moment ago, and the
+        next morning would resume it.
+        """
+        if cycles == self.cycles_completed and elapsed == self.interval_elapsed:
+            return self
+        return replace(
+            self,
+            cycles_completed=max(0, cycles),
+            interval_elapsed=max(0.0, elapsed),
+            tracked_at=now or _now(),
+        )
+
+    def resumable_position(
+        self, max_age: float, now: datetime | None = None
+    ) -> tuple[int, float]:
+        """Cycles and part-interval worth carrying into a fresh run.
+
+        `max_age` is `idle_reset_after`: the gap that discards a position
+        during a run has to discard it across a restart too, or quitting
+        for the evening would hand tomorrow morning three cycles it never
+        worked for. A stamp in the future — the clock moved back — is
+        treated the same way, since its age cannot be trusted either.
+        """
+        if self.tracked_at is None:
+            return 0, 0.0
+        age = ((now or _now()) - self.tracked_at).total_seconds()
+        if age < 0 or age > max_age:
+            return 0, 0.0
+        return self.cycles_completed, self.interval_elapsed
 
     # -- walking (SPEC §7) --------------------------------------------
 
@@ -274,6 +329,11 @@ class AppState:
                 self.walk_started_at.isoformat() if self.walk_started_at else None
             ),
             "walk_prompts_done": list(self.walk_prompts_done),
+            "cycles_completed": self.cycles_completed,
+            "interval_elapsed_seconds": self.interval_elapsed,
+            "position_tracked_at": (
+                self.tracked_at.isoformat() if self.tracked_at else None
+            ),
             "focus_started_at": (
                 self.focus_started_at.isoformat()
                 if self.focus_started_at else None
@@ -307,6 +367,9 @@ class AppState:
                 str(x) for x in data.get("walk_prompts_done", [])
                 if isinstance(x, str)
             ),
+            cycles_completed=int(_seconds(data, "cycles_completed")),
+            interval_elapsed=_seconds(data, "interval_elapsed_seconds"),
+            tracked_at=_moment(data.get("position_tracked_at")),
             focus_started_at=_moment(data.get("focus_started_at")),
             focus_uses_today=int(_seconds(data, "focus_uses_today")),
             emergency_grants=grants,

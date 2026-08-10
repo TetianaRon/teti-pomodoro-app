@@ -32,7 +32,7 @@ from .exclusions import (
 )
 from . import runtime, sounds, summary, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
-from .timer import Event, PomodoroEngine, State
+from .timer import Event, PomodoroEngine, Position, State
 
 TICK_MS = 1000
 
@@ -47,6 +47,7 @@ class Application:
         watcher: CalendarWatcher | None = None,
         state_file: Path | None = None,
         settings: settings_module.Settings | None = None,
+        settings_file: Path | None = None,
     ) -> None:
         self.config = config
         self.settings = settings or settings_module.Settings(config=config)
@@ -68,7 +69,12 @@ class Application:
             if watcher is not None and watcher.configured
             else device_detector
         )
-        self._settings_file = settings_module.default_path()
+        # `--config PATH` has to move the whole data directory, not half of
+        # it. This was hardcoded to the default, so a run against a scratch
+        # config wrote its state where it was told and its history into the
+        # real log — which is how a test run put a zeroed snapshot and a
+        # false app_stopped into a live day (2026-08-10).
+        self._settings_file = settings_file or settings_module.default_path()
         self._state_file = state_file
         self._state = state_module.load(state_file)
         self.engine = PomodoroEngine(config, now=time.monotonic())
@@ -84,6 +90,8 @@ class Application:
         )
         self._last_snapshot = 0.0
         self._logged_day_type = ""
+        # After the history log exists, so the resume can be recorded there.
+        self._resume_position()
         # Resolved once: a missing file should be reported at startup, not
         # discovered as silence at the moment a break lands.
         # Falls back to the first available clip when nothing is chosen, so
@@ -345,10 +353,19 @@ class Application:
             return f"on a break — {_short(snapshot.remaining)} left"
         if snapshot.state in (State.WORK, State.WARNING):
             left = _short(snapshot.remaining)
+            # Naming the long break makes the cycle count visible, which it
+            # otherwise never is: a long break that fails to arrive looks
+            # exactly like one that was not due yet.
+            long_next = self._next_break_is_long(snapshot)
+            kind = "a long break" if long_next else "a break"
             if snapshot.paused:
-                return f"paused — {left} to a break when you resume"
-            return f"{left} to a break"
+                return f"paused — {left} to {kind} when you resume"
+            return f"{left} to {kind}"
         return "watching for activity"
+
+    def _next_break_is_long(self, snapshot) -> bool:
+        every = self.config.long_break_every
+        return every > 0 and (snapshot.completed_cycles + 1) % every == 0
 
     def _refresh_tray(self) -> None:
         status = self.tray_status
@@ -461,6 +478,52 @@ class Application:
         elif not self._cap.over:
             self._announced_over = False
 
+    # -- the place in the cycle (SPEC §2.2) ---------------------------
+
+    def _resume_position(self) -> None:
+        """Pick up the previous run's place in the cycle.
+
+        The app is restarted several times on an ordinary day here — that
+        is how a change gets picked up — and the engine is built fresh each
+        time. Nothing carried over, so every restart began again at the
+        first of four intervals and the long break never arrived on a day
+        of restarts (found in live use, 2026-08-10).
+
+        The saved position is only honoured while it is recent, measured by
+        `idle_reset_after` — the same gap that discards a part-interval and
+        clears the cycle count during a run. Only the timing is restored:
+        the day's work total was already banked in `state.json` as it
+        accrued, so nothing here re-credits it.
+        """
+        position = Position(
+            *self._state.resumable_position(self.config.idle_reset_after)
+        )
+        if position.empty:
+            return
+        self.engine.resume(position)
+        cycle = position.completed_cycles + 1
+        into = position.interval_elapsed
+        detail = f"cycle {cycle} of {self.config.long_break_every}"
+        self._log(
+            f"resuming a previous run — {detail}"
+            + (f", {into / 60:.0f} min into the interval" if into >= 60 else "")
+        )
+        self.history.record(
+            history_module.CYCLES_RESUMED, seconds=into, detail=detail,
+        )
+
+    def _track_position(self) -> None:
+        """Keep the persisted state in step with the engine's position.
+
+        Written every tick but saved on `_record_work`'s slower cadence,
+        plus once on a clean shutdown — so a hard kill loses at most half a
+        minute of the current interval, and never the cycle count.
+        """
+        position = self.engine.position()
+        self._state = self._state.with_position(
+            position.completed_cycles, position.interval_elapsed
+        )
+
     def _record_work(self, now: float) -> None:
         """Fold the engine's credited work into the persisted daily total."""
         delta = self.engine.worked_total - self._last_worked_total
@@ -569,6 +632,7 @@ class Application:
         )
         snapshot = self.engine.snapshot()
         self._drain_tray()
+        self._track_position()
         self._record_work(now)
         self._update_focus()
         self._update_walking()
@@ -614,6 +678,12 @@ class Application:
             self._log("session dropped after a long idle gap")
         elif event is Event.CYCLES_RESET:
             self._log("long-break cycle count reset")
+            self.history.record(
+                history_module.CYCLES_RESET,
+                detail=(
+                    f"after {self.config.idle_reset_after / 60:.0f} min idle"
+                ),
+            )
         elif event is Event.EXCLUSION_STARTED:
             self._log(f"holding off — {self._exclusion.describe()}")
             self.history.record(
@@ -781,7 +851,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def report_exclusions(config: Config, settings) -> int:
+def report_exclusions(
+    config: Config, settings, settings_file: Path | None = None
+) -> int:
     """`--exclusions`: say what is holding breaks off right now, and why."""
     from .exclusions import devices_in_use
 
@@ -824,7 +896,9 @@ def report_exclusions(config: Config, settings) -> int:
     else:
         print("  -> nothing blocking a break")
 
-    state = state_module.load(state_module.state_path())
+    # The same data directory the app itself would use, so `--config` does
+    # not report one file's budget while the app spends another's.
+    state = state_module.load(state_module.state_path(settings_file))
     left = state.skip_remaining(config.custom_skip_daily_budget) / 60
     print(f"\n  custom skip left today: {left:.0f} min")
     return 0
@@ -901,7 +975,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.exclusions:
         loaded = settings_module.load(path)
-        return report_exclusions(loaded.config, loaded)
+        return report_exclusions(loaded.config, loaded, path)
 
     # Only now, for the run that actually starts the app: without a
     # console the log has nowhere to go, which is true of a packaged build
@@ -957,6 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
         watcher=watcher,
         state_file=state_module.state_path(path),
         settings=settings,
+        settings_file=path,
     )
     try:
         app.run()

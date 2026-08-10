@@ -23,7 +23,44 @@ You work long, unbroken stretches — including late evenings and nights — at 
 | `start_threshold` | 1 min | Span of sustained input needed to auto-start a session. Measured between first and last keystroke, so the grace period above can't satisfy it on its own. |
 | `warning_lead` | 2 min | How far ahead of the lock the warning appears. |
 | `idle_pause_after` | 2 min | When the session is shown as paused. Accrual has already stopped at the last keystroke; this is the user-visible signal. |
-| `idle_reset_after` | 60 min | When the part-finished interval is discarded and the long-break cycle count resets. |
+| `idle_reset_after` | 60 min | When the part-finished interval is discarded and the long-break cycle count resets. Also how long a saved position stays resumable across a restart — see below. |
+
+**The rhythm survives a restart (added 2026-08-10).** The app is quit and
+relaunched several times on an ordinary day, because that is how a change gets
+picked up. The engine is rebuilt from scratch each time and nothing carried
+over, so every launch began again at the first of four intervals: on
+2026-08-10 — a full working day of 10 breaks — **the long break never fired
+once**, and the loss was invisible, since a long break that never arrives looks
+exactly like one that was not due yet.
+
+The completed-cycle count and the part-finished interval are therefore
+persisted in `state.json` alongside a timestamp of when they were last true,
+and reloaded at launch. Four rules keep a restored position honest:
+
+- **It ages out on `idle_reset_after`.** The gap that discards a position
+  during a run discards it across a restart too — otherwise quitting for the
+  evening would hand the next morning three cycles it never worked for. The
+  stamp records when the position was last *true*, not last written, so an idle
+  hour before quitting cannot refresh it. A stamp in the future (the clock moved
+  back) is distrusted the same way.
+- **The part-interval is credit, not a running session.** A saved file cannot
+  say you are at the desk, so the restored minutes are held and paid into the
+  next session only once `start_threshold` has observed real work — and the
+  credit expires on the same hour-long idle gap. A restart followed by an
+  absence resumes nothing.
+- **A break in progress is not resumed.** Re-raising a lock at launch would be
+  a hostile way to start, and an unfinished break never counted towards the
+  long one anyway, so quitting mid-break costs that break and nothing else.
+- **Only the timing is restored.** The day's work total is banked in
+  `state.json` as it accrues; nothing here re-credits it, so a restart cannot
+  inflate hours worked or the daily cap.
+
+It survives midnight as well: the rhythm has no idea what day it is, and an
+interval worked up to 23:59 is not finished by the date changing. Staleness is
+decided by the stamp's age, never by the calendar. Because the count is
+otherwise invisible, the tray now names the next break — "12 min to a long
+break" — and `--events` records `cycles_resumed` and `cycles_reset`, so a
+missing long break is auditable rather than a matter of memory.
 
 **Media is paused when the lock appears (added 2026-08-09).** A video would
 otherwise carry on behind the overlay — audible, invisible, and impossible to
