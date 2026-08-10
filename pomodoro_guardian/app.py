@@ -307,22 +307,36 @@ class Application:
         self.settings = saved
         self._log("settings saved — rhythm and lock changes need a restart")
 
+    def _status_line(self, snapshot) -> str:
+        """One line for the tray, saying how long until the next break.
+
+        The question this answers is "have I done 25 minutes yet?", which
+        is genuinely hard to know otherwise: work only accrues while you
+        are actually typing, so a wall-clock hour of reading counts for
+        very little and the interval is nothing like 25 minutes long.
+        """
+        if snapshot.excluded:
+            reason = self._exclusion.describe()
+            return f"holding off — {reason}" if reason else "holding off"
+        if self._state.focusing:
+            left = self._state.focus_remaining(self.settings.focus_max_hours)
+            return f"focus mode — breaks off for {_short(left)}"
+        if snapshot.state is State.BREAK:
+            return f"on a break — {_short(snapshot.remaining)} left"
+        if snapshot.state in (State.WORK, State.WARNING):
+            left = _short(snapshot.remaining)
+            if snapshot.paused:
+                return f"paused — {left} to a break when you resume"
+            return f"{left} to a break"
+        return "watching for activity"
+
     def _refresh_tray(self) -> None:
         status = self.tray_status
         snapshot = self.engine.snapshot()
         walked = self._state.walked_including_current() / 60
         target = self.settings.walking_target_minutes
 
-        status.summary = {
-            State.IDLE: "watching for activity",
-            State.WORK: "working",
-            State.WARNING: "break soon",
-            State.BREAK: "on a break",
-        }[snapshot.state]
-        if snapshot.excluded:
-            status.summary = "holding off"
-        elif self._state.focusing:
-            status.summary = "focus mode"
+        status.summary = self._status_line(snapshot)
         status.cap_line = self._cap.describe() if self._cap else ""
         status.walk_line = f"walked {walked:.0f} of {target:.0f} min"
         status.walking = self._state.walking
@@ -781,6 +795,17 @@ def report_exclusions(config: Config, settings) -> int:
     return 0
 
 
+def _short(seconds: float) -> str:
+    """A duration a glance can read: "12 min", "45 sec", "1h 20m"."""
+    seconds = max(0.0, seconds)
+    if seconds >= 3600:
+        hours, rest = divmod(int(seconds), 3600)
+        return f"{hours}h {rest // 60:02d}m"
+    if seconds >= 60:
+        return f"{int(seconds) // 60} min"
+    return f"{int(seconds)} sec"
+
+
 def _or_none(names: list[str]) -> str:
     return ", ".join(names) if names else "nobody"
 
@@ -789,9 +814,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     path = args.config or settings_module.default_path()
 
-    # A packaged build has no console, so the log has to go somewhere it
-    # can be read after the fact.
-    if runtime.frozen():
+    # No console means the log has nowhere to go — true of a packaged
+    # build and, more importantly, of the Startup shortcut, which is when
+    # nobody is watching a terminal anyway.
+    if runtime.frozen() or not runtime.has_console():
         runtime.redirect_output()
 
     if args.history is not None or args.events is not None:

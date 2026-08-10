@@ -90,6 +90,24 @@ class SingleInstance:
 # -- logging ----------------------------------------------------------
 
 
+def has_console() -> bool:
+    """True if there is a console window for output to reach.
+
+    Launched from the Startup shortcut there is none — `pythonw.exe` keeps
+    a usable `sys.stdout`, so nothing crashes, but everything written to it
+    is discarded. That is precisely when a log is most wanted, since there
+    is nobody watching a terminal at login.
+    """
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except Exception:  # pragma: no cover - assume a console rather than eat output
+        return True
+
+
 def log_path(settings_dir: Path | None = None) -> Path:
     from .settings import default_path
 
