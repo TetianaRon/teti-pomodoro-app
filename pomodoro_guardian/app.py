@@ -318,12 +318,6 @@ class Application:
             self.settings.override_raises_per_month
             - self._state.raises_used_this_month(),
         )
-        status.colour = (
-            tray.WALKING if self._state.walking
-            else tray.BREAK if snapshot.state is State.BREAK
-            else tray.WORKING if snapshot.state in (State.WORK, State.WARNING)
-            else tray.IDLE
-        )
         self.tray.refresh()
 
     def _update_walking(self) -> None:

@@ -31,11 +31,46 @@ SET_WORKING_DAY = "set_working_day"
 CLEAR_OVERRIDE = "clear_override"
 QUIT = "quit"
 
-# Icon colours by state, so a glance at the tray says what is happening.
-IDLE = (124, 136, 153)
-WORKING = (143, 180, 217)
-BREAK = (232, 238, 247)
-WALKING = (79, 168, 112)
+BODY = (198, 62, 48)
+HIGHLIGHT = (224, 106, 92)
+LEAF = (74, 138, 74)
+WALK_BADGE = (46, 190, 110)
+
+
+def render_icon(walking: bool = False, size: int = 64):
+    """The tomato, with a green badge while walking.
+
+    Drawn rather than loaded so the tray needs no file at runtime, and
+    supersampled 4× before resizing because the real target is a 16px
+    tray slot, where aliasing is the difference between a tomato and a
+    smudge.
+    """
+    from PIL import Image, ImageDraw
+
+    scale = 4
+    box = size * scale
+    image = Image.new("RGBA", (box, box), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    unit = box / 256
+
+    def at(*points):
+        return [p * unit for p in points]
+
+    draw.ellipse(at(16, 40, 240, 240), fill=BODY + (255,))
+    draw.ellipse(at(44, 68, 120, 132), fill=HIGHLIGHT + (255,))
+    draw.polygon(
+        [(128 * unit, 44 * unit), (96 * unit, 8 * unit),
+         (128 * unit, 24 * unit), (160 * unit, 8 * unit)],
+        fill=LEAF + (255,),
+    )
+
+    if walking:
+        # Ringed in the background colour so the badge stays legible
+        # against the tomato at 16px.
+        draw.ellipse(at(140, 140, 252, 252), fill=(18, 22, 28, 255))
+        draw.ellipse(at(148, 148, 244, 244), fill=WALK_BADGE + (255,))
+
+    return image.resize((size, size), Image.LANCZOS)
 
 
 def _left_click_icon(pystray):
@@ -79,7 +114,6 @@ class TrayStatus:
         self.override = None          # None / "working" / "non_working"
         self.raises_left = 0
         self.starts_with_windows = False
-        self.colour = IDLE
 
 
 class TrayIcon:
@@ -104,7 +138,7 @@ class TrayIcon:
         icon_class = _left_click_icon(pystray)
         self._icon = icon_class(
             "Pomodoro Guardian",
-            icon=self._image(self.status.colour),
+            icon=self._image(self.status.walking),
             title="Pomodoro Guardian",
             menu=self._menu(pystray),
         )
@@ -137,7 +171,7 @@ class TrayIcon:
         if self._icon is None:
             return
         try:
-            self._icon.icon = self._image(self.status.colour)
+            self._icon.icon = self._image(self.status.walking)
             self._icon.title = f"Pomodoro Guardian — {self.status.summary}"
             self._icon.update_menu()
         except Exception:  # pragma: no cover - a redraw is never critical
@@ -210,12 +244,5 @@ class TrayIcon:
     # -- icon ---------------------------------------------------------
 
     @staticmethod
-    def _image(colour):
-        """A plain filled circle. Recognisable at 16px, which is the point."""
-        from PIL import Image, ImageDraw
-
-        size = 64
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.ellipse((4, 4, size - 4, size - 4), fill=colour + (255,))
-        return image
+    def _image(walking: bool = False):
+        return render_icon(walking)
