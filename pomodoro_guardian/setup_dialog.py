@@ -25,12 +25,20 @@ PAD = 10
 
 
 class SetupDialog:
-    def __init__(self, settings: Settings, path: Path, first_run: bool) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        path: Path,
+        first_run: bool,
+        parent: tk.Misc | None = None,
+    ) -> None:
         self._path = path
         self._start = settings
         self._result: Settings | None = None
-
-        self._root = tk.Tk()
+        # A second tk.Tk() in one process misbehaves, so when the app is
+        # already running this has to be a child window instead.
+        self._owns_root = parent is None
+        self._root = tk.Tk() if parent is None else tk.Toplevel(parent)
         self._root.title(
             "Pomodoro Guardian — Setup" if first_run
             else "Pomodoro Guardian — Settings"
@@ -260,7 +268,13 @@ class SetupDialog:
         )
 
     def run(self) -> Settings | None:
-        self._root.mainloop()
+        if self._owns_root:
+            self._root.mainloop()
+        else:
+            # Modal against the running app: wait for this window alone
+            # rather than starting a second event loop.
+            self._root.grab_set()
+            self._root.wait_window()
         return self._result
 
 
@@ -302,6 +316,11 @@ def _positive(var, label, allow_zero=False):
     return value
 
 
-def run_setup(settings: Settings, path: Path, first_run: bool) -> Settings | None:
+def run_setup(
+    settings: Settings,
+    path: Path,
+    first_run: bool,
+    parent: tk.Misc | None = None,
+) -> Settings | None:
     """Show the dialog. Returns the saved settings, or None if dismissed."""
-    return SetupDialog(settings, path, first_run).run()
+    return SetupDialog(settings, path, first_run, parent).run()

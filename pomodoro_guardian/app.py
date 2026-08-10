@@ -8,6 +8,7 @@ only threaded part, and it only ever writes a timestamp.
 from __future__ import annotations
 
 import argparse
+import queue
 import time
 import tkinter as tk
 from pathlib import Path
@@ -28,7 +29,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import walking
+from . import tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -68,6 +69,7 @@ class Application:
             else device_detector
         )
         self._state_file = state_file
+        self._settings_file = settings_module.default_path()
         self._state = state_module.load(state_file)
         self.engine = PomodoroEngine(config, now=time.monotonic())
         self._excluded_since: float | None = None
@@ -88,6 +90,8 @@ class Application:
             on_emergency=self._take_emergency,
         )
         self.banner = WarningBanner(self._root, config)
+        self.tray_status = tray.TrayStatus()
+        self.tray = tray.TrayIcon(self.tray_status)
         self.walk_prompt = walking.WalkPrompt(
             self._root,
             on_start=self._start_walk,
@@ -167,6 +171,92 @@ class Application:
         )
         if total >= target:
             self.walk_prompt.hide()
+
+    # -- tray (SPEC §9) -----------------------------------------------
+
+    def _drain_tray(self) -> None:
+        """Handle menu clicks. They arrive on pystray's thread, so they are
+        queued there and acted on here, where tkinter is safe to touch."""
+        while True:
+            try:
+                action = self.tray.actions.get_nowait()
+            except queue.Empty:
+                return
+            if action == tray.START_WALK:
+                self._start_walk()
+            elif action == tray.STOP_WALK:
+                self._stop_walk()
+            elif action == tray.OPEN_SETTINGS:
+                self._open_settings()
+            elif action == tray.SET_DAY_OFF:
+                self._set_override(state_module.NON_WORKING)
+            elif action == tray.SET_WORKING_DAY:
+                self._set_override(state_module.WORKING)
+            elif action == tray.CLEAR_OVERRIDE:
+                self._set_override(None)
+            elif action == tray.QUIT:
+                self._log("quitting from the tray")
+                self._root.quit()
+
+    def _set_override(self, kind: str | None) -> None:
+        """Correct the day's classification by hand (SPEC §5a)."""
+        if kind == state_module.WORKING and not self._state.can_raise(
+            self.settings.override_raises_per_month
+        ):
+            self._log("no day-type raises left this month")
+            return
+        if kind == state_module.WORKING and self._state.day_type_override == kind:
+            return   # already raised today; don't spend a second one
+        self._state = self._state.with_override(kind)
+        self._save_state()
+        self._update_cap()
+        self._log(f"day type: {self._cap.day_type.description}")
+
+    def _open_settings(self) -> None:
+        from .setup_dialog import run_setup
+
+        saved = run_setup(
+            self.settings, self._settings_file, first_run=False,
+            parent=self._root,
+        )
+        if saved is None:
+            return
+        # Caps, walking and calendar settings are read fresh every tick, so
+        # they apply at once. The rhythm and lock values are baked into the
+        # engine and overlay at construction, so those need a restart.
+        self.settings = saved
+        self._log("settings saved — rhythm and lock changes need a restart")
+
+    def _refresh_tray(self) -> None:
+        status = self.tray_status
+        snapshot = self.engine.snapshot()
+        walked = self._state.walked_including_current() / 60
+        target = self.settings.walking_target_minutes
+
+        status.summary = {
+            State.IDLE: "watching for activity",
+            State.WORK: "working",
+            State.WARNING: "break soon",
+            State.BREAK: "on a break",
+        }[snapshot.state]
+        if snapshot.excluded:
+            status.summary = "holding off"
+        status.cap_line = self._cap.describe() if self._cap else ""
+        status.walk_line = f"walked {walked:.0f} of {target:.0f} min"
+        status.walking = self._state.walking
+        status.override = self._state.day_type_override
+        status.raises_left = max(
+            0,
+            self.settings.override_raises_per_month
+            - self._state.raises_used_this_month(),
+        )
+        status.colour = (
+            tray.WALKING if self._state.walking
+            else tray.BREAK if snapshot.state is State.BREAK
+            else tray.WORKING if snapshot.state in (State.WORK, State.WARNING)
+            else tray.IDLE
+        )
+        self.tray.refresh()
 
     def _update_walking(self) -> None:
         """Prompt at the configured times, and keep the window current."""
@@ -265,6 +355,8 @@ class Application:
         self.monitor.start()
         if self.watcher is not None:
             self.watcher.start()
+        if not self.dry_run and self.tray.start():
+            self._log("tray icon ready — right-click it for walking, settings")
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
@@ -285,6 +377,7 @@ class Application:
         self.overlay.release()
         self.banner.hide()
         self.walk_prompt.hide()
+        self.tray.stop()
         self.monitor.stop()
         if self.watcher is not None:
             self.watcher.stop()
@@ -301,9 +394,11 @@ class Application:
             now, self.monitor.last_input_at, excluded=exclusion.active
         )
         snapshot = self.engine.snapshot()
+        self._drain_tray()
         self._record_work(now)
         self._update_walking()
         self._update_cap()
+        self._refresh_tray()
         notice = self._watch_long_exclusion(now, exclusion.active)
         if notice is None and self._cap is not None and self._cap.over:
             # A standing marker, so being over the cap is visible without
