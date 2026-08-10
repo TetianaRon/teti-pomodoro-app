@@ -35,6 +35,33 @@ BREAK = (232, 238, 247)
 WALKING = (79, 168, 112)
 
 
+def _left_click_icon(pystray):
+    """pystray's Icon, but opening the menu on a left click too.
+
+    Its Windows backend pops the menu only on right-click; a left click
+    activates the *default* menu item instead. Remapping the message lets
+    left-click reuse pystray's own popup code rather than reimplementing
+    `TrackPopupMenuEx`, which has to juggle foreground-window rules.
+
+    Falls back to the stock Icon if the internals ever move — a tray that
+    needs a right-click is a small loss next to no tray at all.
+    """
+    try:
+        from pystray import _win32
+
+        win32 = _win32.win32
+
+        class LeftClickIcon(pystray.Icon):
+            def _on_notify(self, wparam, lparam):
+                if lparam == win32.WM_LBUTTONUP and self._menu_handle:
+                    lparam = win32.WM_RBUTTONUP
+                return super()._on_notify(wparam, lparam)
+
+        return LeftClickIcon
+    except Exception:  # pragma: no cover - non-Windows or changed internals
+        return pystray.Icon
+
+
 class TrayStatus:
     """What the menu should currently show. Plain data, set by the app."""
 
@@ -67,8 +94,9 @@ class TrayIcon:
         except ImportError:
             return False
 
-        self._icon = pystray.Icon(
-            "pomodoro_guardian",
+        icon_class = _left_click_icon(pystray)
+        self._icon = icon_class(
+            "Pomodoro Guardian",
             icon=self._image(self.status.colour),
             title="Pomodoro Guardian",
             menu=self._menu(pystray),

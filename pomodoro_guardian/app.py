@@ -162,11 +162,15 @@ class Application:
         before = self._state.walked_today
         self._state = self._state.stop_walk()
         self._save_state()
-        minutes = (self._state.walked_today - before) / 60
+        seconds = self._state.walked_today - before
         total = self._state.walked_today / 60
         target = self.settings.walking_target_minutes
+        # Seconds under a minute: "0 min" for a short walk reads as a bug.
+        spent = (
+            f"{seconds:.0f} sec" if seconds < 60 else f"{seconds / 60:.0f} min"
+        )
         self._log(
-            f"walking stopped — {minutes:.0f} min "
+            f"walking stopped — {spent} "
             f"({total:.0f} of {target:.0f} min today)"
         )
         if total >= target:
@@ -356,7 +360,7 @@ class Application:
         if self.watcher is not None:
             self.watcher.start()
         if not self.dry_run and self.tray.start():
-            self._log("tray icon ready — right-click it for walking, settings")
+            self._log("tray icon ready — click it for walking, settings, quit")
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
