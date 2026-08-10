@@ -16,6 +16,7 @@ from pathlib import Path
 from datetime import date, datetime
 
 from . import caps
+from . import history as history_module
 from . import settings as settings_module
 from . import state as state_module
 from .activity import ActivityMonitor, create_monitor
@@ -68,8 +69,8 @@ class Application:
             if watcher is not None and watcher.configured
             else device_detector
         )
-        self._state_file = state_file
         self._settings_file = settings_module.default_path()
+        self._state_file = state_file
         self._state = state_module.load(state_file)
         self.engine = PomodoroEngine(config, now=time.monotonic())
         self._excluded_since: float | None = None
@@ -79,6 +80,11 @@ class Application:
         self._last_state_save = 0.0
         self._cap: caps.CapStatus | None = None
         self._announced_over = False
+        self.history = history_module.History(
+            history_module.history_path(self._settings_file)
+        )
+        self._last_snapshot = 0.0
+        self._logged_day_type = ""
 
         self._root = tk.Tk()
         self._root.withdraw()  # the controller window is never shown
@@ -150,6 +156,10 @@ class Application:
             f"emergency mode: +{grant:.0f}h "
             f"({left:.0f}h of weekly budget left)"
         )
+        self.history.record(
+            history_module.EMERGENCY_USED, seconds=grant * 3600,
+            detail=f"{left:.0f}h left this week",
+        )
 
     # -- walking (SPEC §7) --------------------------------------------
 
@@ -173,6 +183,10 @@ class Application:
             f"walking stopped — {spent} "
             f"({total:.0f} of {target:.0f} min today)"
         )
+        self.history.record(
+            history_module.WALK_ENDED, seconds=seconds,
+            detail=f"{total:.0f} of {target:.0f} min today",
+        )
         if total >= target:
             self.walk_prompt.hide()
 
@@ -193,6 +207,7 @@ class Application:
             f"focus mode started — up to "
             f"{self.settings.focus_max_hours:.0f}h, breaks suppressed"
         )
+        self.history.record(history_module.FOCUS_STARTED)
 
     def _stop_focus(self, expired: bool = False) -> None:
         if not self._state.focusing:
@@ -202,6 +217,10 @@ class Application:
         self._log(
             "focus mode ended — its two hours are up" if expired
             else "focus mode ended"
+        )
+        self.history.record(
+            history_module.FOCUS_ENDED,
+            detail="expired" if expired else "stopped",
         )
 
     def _update_focus(self) -> None:
@@ -262,6 +281,9 @@ class Application:
         self._save_state()
         self._update_cap()
         self._log(f"day type: {self._cap.day_type.description}")
+        self.history.record(
+            history_module.OVERRIDE_SET, detail=str(kind),
+        )
 
     def _open_settings(self) -> None:
         from .setup_dialog import run_setup
@@ -367,11 +389,33 @@ class Application:
         # Past the cap the work interval shortens, so breaks become a
         # standing nudge rather than the app switching itself off.
         self.engine.overtime = self._cap.over
+
+        # Record the classification whenever it changes. This is the log's
+        # audit trail: a day misjudged — a holiday read as a working day,
+        # an override that failed to apply — is otherwise invisible once
+        # the day rolls over, and those are exactly the bugs that take
+        # days to notice.
+        description = day_type.description
+        if description != self._logged_day_type:
+            self._logged_day_type = description
+            self.history.record(
+                history_module.DAY_CLASSIFIED,
+                seconds=self._cap.effective_seconds,
+                detail=(
+                    f"{description}; cap "
+                    f"{self._cap.effective_seconds / 3600:.2f}h"
+                ),
+            )
+
         if self._cap.over and not self._announced_over:
             self._announced_over = True
             self._log(
                 f"over the daily cap — {self._cap.describe()}; breaks now every "
                 f"{self.config.overtime_work_duration / 60:.0f} min"
+            )
+            self.history.record(
+                history_module.CAP_REACHED, seconds=self._cap.worked_seconds,
+                detail=self._cap.describe(),
             )
         elif not self._cap.over:
             self._announced_over = False
@@ -387,6 +431,14 @@ class Application:
         if now - self._last_state_save >= 30:
             self._last_state_save = now
             self._save_state()
+        # A running total every few minutes, so a day survives a crash and
+        # the shape of it can be seen afterwards.
+        if now - self._last_snapshot >= 300:
+            self._last_snapshot = now
+            self.history.snapshot(
+                self._state.worked_today,
+                self._state.walked_including_current(),
+            )
 
     def _save_state(self) -> None:
         try:
@@ -405,6 +457,10 @@ class Application:
             f"break skipped for {seconds / 60:.0f} min "
             f"({left / 60:.0f} min of budget left today)"
         )
+        self.history.record(
+            history_module.BREAK_SKIPPED, seconds=seconds,
+            detail=f"{left / 60:.0f} min left",
+        )
 
     def _roll_state(self) -> None:
         """Reset the day's budgets when the date changes under a long run."""
@@ -419,6 +475,9 @@ class Application:
             self.watcher.start()
         if not self.dry_run and self.tray.start():
             self._log("tray icon ready — click it for walking, settings, quit")
+        # Start and stop are recorded so a gap in the log can be told from
+        # a crash: a start with no matching stop is the app dying.
+        self.history.record(history_module.APP_STARTED)
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
@@ -444,6 +503,10 @@ class Application:
         if self.watcher is not None:
             self.watcher.stop()
         self._save_state()   # don't lose the tally on a clean exit
+        self.history.snapshot(
+            self._state.worked_today, self._state.walked_including_current()
+        )
+        self.history.record(history_module.APP_STOPPED)
 
     # -- loop ---------------------------------------------------------
 
@@ -501,6 +564,9 @@ class Application:
             self._log("long-break cycle count reset")
         elif event is Event.EXCLUSION_STARTED:
             self._log(f"holding off — {self._exclusion.describe()}")
+            self.history.record(
+                history_module.EXCLUDED, detail=self._exclusion.describe()
+            )
         elif event is Event.EXCLUSION_ENDED:
             self._log("clear again — countdown resumes")
         elif event is Event.WARNING_STARTED:
@@ -520,6 +586,10 @@ class Application:
         elif event is Event.BREAK_ENDED:
             self._log(
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"
+            )
+            self.history.record(
+                history_module.BREAK_TAKEN,
+                detail="long" if snapshot.is_long_break else "short",
             )
             self.overlay.release()
 
@@ -609,6 +679,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="open the settings window, then exit",
     )
     parser.add_argument(
+        "--history",
+        nargs="?",
+        const=7,
+        type=int,
+        metavar="DAYS",
+        help="print the last N days (default 7), then exit",
+    )
+    parser.add_argument(
+        "--events",
+        nargs="?",
+        const=40,
+        type=int,
+        metavar="N",
+        help="print the last N raw events — the view for chasing a bug",
+    )
+    parser.add_argument(
         "--shortcuts",
         action="store_true",
         help="create Start Menu and desktop shortcuts, then exit",
@@ -696,6 +782,23 @@ def main(argv: list[str] | None = None) -> int:
     # can be read after the fact.
     if runtime.frozen():
         runtime.redirect_output()
+
+    if args.history is not None or args.events is not None:
+        log = history_module.History(history_module.history_path(path))
+        if not log.enabled:
+            print(f"no history at {log.path}")
+            return 1
+        if args.history is not None:
+            print(f"Last {args.history} days — {log.path}\n")
+            for day in log.recent_days(args.history):
+                print(" ", day.describe())
+        if args.events is not None:
+            print(f"\nLast {args.events} events\n")
+            for at, kind, seconds, detail in log.tail(args.events):
+                stamp = at[:19].replace("T", " ")
+                amount = f"{seconds:.0f}s" if seconds is not None else ""
+                print(f"  {stamp}  {kind:16} {amount:>8}  {detail or ''}")
+        return 0
 
     if args.shortcuts:
         for name, path in (
