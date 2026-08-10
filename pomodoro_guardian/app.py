@@ -30,7 +30,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import runtime, tray, walking
+from . import runtime, summary, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -98,6 +98,7 @@ class Application:
         self.banner = WarningBanner(self._root, config)
         self.tray_status = tray.TrayStatus()
         self.tray = tray.TrayIcon(self.tray_status)
+        self.summary_window = summary.SummaryWindow(self._root)
         self.walk_prompt = walking.WalkPrompt(
             self._root,
             on_start=self._start_walk,
@@ -249,6 +250,12 @@ class Application:
                 self._start_focus()
             elif action == tray.STOP_FOCUS:
                 self._stop_focus()
+            elif action == tray.SHOW_HISTORY:
+                self.summary_window.show()
+                self.summary_window.refresh(
+                    self.history, self._cap, self._state, self.settings,
+                    force=True,
+                )
             elif action == tray.OPEN_SETTINGS:
                 self._open_settings()
             elif action == tray.TOGGLE_STARTUP:
@@ -498,6 +505,7 @@ class Application:
         self.overlay.release()
         self.banner.hide()
         self.walk_prompt.hide()
+        self.summary_window.hide()
         self.tray.stop()
         self.monitor.stop()
         if self.watcher is not None:
@@ -525,6 +533,9 @@ class Application:
         self._update_walking()
         self._update_cap()
         self._refresh_tray()
+        self.summary_window.refresh(
+            self.history, self._cap, self._state, self.settings
+        )
         notice = self._watch_long_exclusion(now, exclusion.active)
         if notice is None and self._cap is not None and self._cap.over:
             # A standing marker, so being over the cap is visible without
