@@ -32,6 +32,7 @@ import sys
 import time
 
 VK_MEDIA_PLAY_PAUSE = 0xB3
+VK_VOLUME_MUTE = 0xAD
 KEYEVENTF_KEYUP = 0x0002
 
 #: Peak level counting as "playing". Above float noise, below anything
@@ -98,19 +99,32 @@ def _pid_of(session) -> int | None:
     return getattr(process, "pid", None)
 
 
-def send_play_pause() -> bool:
-    """Press the media play/pause key. Must run before input suppression."""
+def _tap(vk: int) -> bool:
+    """Press and release a virtual key.
+
+    Caught by this app's own input hook while a lock is up, so the caller
+    has to lift keyboard suppression around it — see
+    `InputSuppressor.with_keyboard_lifted`.
+    """
     if not sys.platform.startswith("win"):
         return False
     try:
         import ctypes
 
         user32 = ctypes.windll.user32
-        user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, 0, 0)
-        user32.keybd_event(VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_KEYUP, 0)
+        user32.keybd_event(vk, 0, 0, 0)
+        user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
         return True
     except (OSError, AttributeError):  # pragma: no cover
         return False
+
+
+def send_play_pause() -> bool:
+    return _tap(VK_MEDIA_PLAY_PAUSE)
+
+
+def send_mute() -> bool:
+    return _tap(VK_VOLUME_MUTE)
 
 
 def pause_if_playing() -> bool:

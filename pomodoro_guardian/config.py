@@ -101,12 +101,14 @@ class Config:
     safety_unlock: bool = True
     safety_unlock_hold: float = 3.0
 
-    # Pause whatever is playing as the lock goes up. Sends a real media
-    # key, but only when audio is genuinely playing — the key is a toggle,
-    # so firing it into silence would start playback. Media is not resumed
-    # afterwards: the break exists to get you away from the screen, and
-    # un-pausing on your behalf would be a surprise, not a courtesy.
-    pause_media_on_lock: bool = True
+    # Pause media automatically as the lock goes up. **Off by default.**
+    # The only mechanism that reaches Chrome is VK_MEDIA_PLAY_PAUSE, a
+    # toggle, so firing it requires guessing whether media is playing — and
+    # a wrong guess starts something deliberately paused, which is exactly
+    # what happened to a paused browser video. The lock screen offers "M"
+    # instead: pressing it yourself always means what you intended.
+    # Enable this only if you would rather have the guess than the keypress.
+    pause_media_on_lock: bool = False
 
     # Hard ceiling on input suppression, enforced by a plain thread rather
     # than the UI loop. If the lock ever outlives its break by this much —

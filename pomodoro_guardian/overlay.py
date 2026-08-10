@@ -76,7 +76,7 @@ class InputSuppressor:
         self._stopped.clear()
         self.arm_watchdog()
         try:
-            from pynput import keyboard, mouse
+            from pynput import keyboard
         except ImportError:
             # No pynput: the overlay still covers the screen, it just won't
             # block input underneath. Better degraded than not locking.
@@ -84,22 +84,60 @@ class InputSuppressor:
 
         self._escape_key = keyboard.Key.esc
         self._fired = False
-        self._listeners = [
-            keyboard.Listener(
-                on_press=self._on_press,
-                on_release=self._on_release,
-                suppress=True,
-            ),
-            mouse.Listener(
-                on_move=self._swallow,
-                on_click=self._swallow,
-                on_scroll=self._swallow,
-                suppress=True,
-            ),
-        ]
+        self._listeners = [self._keyboard_listener(), self._mouse_listener()]
         for listener in self._listeners:
             listener.daemon = True
             listener.start()
+
+    def _keyboard_listener(self):
+        from pynput import keyboard
+
+        return keyboard.Listener(
+            on_press=self._on_press,
+            on_release=self._on_release,
+            suppress=True,
+        )
+
+    def _mouse_listener(self):
+        from pynput import mouse
+
+        return mouse.Listener(
+            on_move=self._swallow,
+            on_click=self._swallow,
+            on_scroll=self._swallow,
+            suppress=True,
+        )
+
+    def with_keyboard_lifted(self, action) -> bool:
+        """Run `action` with keyboard suppression down for that instant.
+
+        Needed because a media key this app injects is caught by its own
+        hook like any other. Only the *keyboard* listener is dropped — the
+        mouse stays blocked — and only for the few milliseconds it takes to
+        post one keystroke, on a deliberate keypress from the lock screen.
+
+        That is a real if tiny hole in enforcement, and the honest trade:
+        the alternative is either media that cannot be paused at all, or
+        guessing whether to pause it, which is what caused a paused video
+        to start playing.
+        """
+        if not self._listeners:
+            action()
+            return True
+        keyboard_listener = self._listeners[0]
+        try:
+            keyboard_listener.stop()
+            self._listeners = self._listeners[1:]
+            action()
+        finally:
+            try:
+                replacement = self._keyboard_listener()
+                replacement.daemon = True
+                replacement.start()
+                self._listeners.insert(0, replacement)
+            except Exception:  # pragma: no cover - must never leave it off
+                pass
+        return True
 
     def stop(self) -> None:
         self._stopped.set()   # stands the watchdog down
@@ -259,6 +297,7 @@ class LockOverlay:
         self._on_emergency = on_emergency
         self._windows: list[tk.Toplevel] = []
         self._countdowns: list[tk.Label] = []
+        self._hints: list[tk.Label] = []
         self._bodies: list[tk.Frame] = []
         self._menus: list[tk.Frame] = []
         self._offer = SkipOffer()
@@ -346,6 +385,7 @@ class LockOverlay:
             window.destroy()
         self._windows = []
         self._countdowns = []
+        self._hints = []
         self._bodies = []
         self._menus = []
         self._menu_open = False
@@ -392,6 +432,14 @@ class LockOverlay:
             body, text=f"back at {back_at}", font=("Segoe UI", pt(13)),
             bg=self.BG, fg=self.MUTED,
         ).pack(pady=(pt(12), 0))
+
+        # Offered, not fired automatically: see _media_key.
+        hint = tk.Label(
+            body, text="M   pause or resume media",
+            font=("Segoe UI", pt(12)), bg=self.BG, fg=self.MUTED,
+        )
+        hint.pack(pady=(28, 0))
+        self._hints.append(hint)
 
         if self._config.safety_unlock:
             hint = (
@@ -453,7 +501,36 @@ class LockOverlay:
                     # hold which opened the menu has ended.
                     self._swallow_escape = False
             elif kind == "key":
-                self._menu_key(char, name)
+                if not self._media_key(char, name):
+                    self._menu_key(char, name)
+
+    def _media_key(self, char: str | None, name: str | None) -> bool:
+        """M, or a real media key, toggles playback. True if consumed.
+
+        Offered rather than fired automatically. Deciding for the user
+        meant guessing whether media was playing, and a wrong guess starts
+        something that was deliberately paused — a toggle cannot tell the
+        difference. Pressing it yourself always means what you intended.
+        """
+        wanted = (char or "").lower() == "m" or name in (
+            "media_play_pause", "media_volume_mute",
+        )
+        if not wanted or self._suppressor is None:
+            return False
+        mute = name == "media_volume_mute"
+        self._suppressor.with_keyboard_lifted(
+            media.send_mute if mute else media.send_play_pause
+        )
+        self._flash("muted" if mute else "media toggled")
+        return True
+
+    def _flash(self, message: str) -> None:
+        """Confirm a keypress on screen, since nothing else acknowledges it."""
+        for label in self._hints:
+            try:
+                label.configure(text=message)
+            except tk.TclError:
+                continue
 
     def _open_menu(self) -> None:
         if self._menu_open or not self._windows:
