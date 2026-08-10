@@ -19,3 +19,7 @@ credentials.json
 # grants read access to all of it — neither belongs in a GitHub repo.
 *.ics
 local/
+
+# Break chimes are personal stock files, not ours to redistribute.
+assets/break-start.*
+assets/break-end.*

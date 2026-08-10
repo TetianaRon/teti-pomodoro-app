@@ -64,6 +64,12 @@ class Settings:
     focus_max_hours: float = 2.0
     focus_uses_per_day: int = 1
 
+    # Chimes for the start and end of a break. Empty means "look for
+    # assets/break-start.* and assets/break-end.*", so dropping a file in
+    # is enough; missing files are simply silent.
+    break_start_sound: str = ""
+    break_end_sound: str = ""
+
     # Walking goal (docs/SPEC.md §7), in minutes.
     walking_target_minutes: float = 60.0
     # When to ask. Tracking is a manual toggle, so the app's job is to
@@ -111,6 +117,10 @@ class Settings:
             "walking": {
                 "target_minutes": self.walking_target_minutes,
                 "reminder_times": list(self.walking_reminder_times),
+            },
+            "sounds": {
+                "break_start": self.break_start_sound,
+                "break_end": self.break_end_sound,
             },
         }
 
@@ -184,12 +194,19 @@ class Settings:
                 walking, "target_minutes", base.walking_target_minutes),
             walking_reminder_times=_times(
                 walking.get("reminder_times"), base.walking_reminder_times),
+            break_start_sound=_text(_section(data, "sounds"), "break_start"),
+            break_end_sound=_text(_section(data, "sounds"), "break_end"),
         )
 
 
 def _section(data: dict, name: str) -> dict:
     value = data.get(name)
     return value if isinstance(value, dict) else {}
+
+
+def _text(section: dict, key: str) -> str:
+    value = section.get(key, "")
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _times(raw, fallback: tuple[str, ...]) -> tuple[str, ...]:

@@ -567,32 +567,65 @@ class LockOverlay:
 class WarningBanner:
     """The 2-minute heads-up before the lock (SPEC §2.3).
 
-    A small always-on-top toast in the corner of the primary monitor. It
-    must not steal focus or block anything — the whole point is letting you
-    wrap up first — so it is made **click-through**: every click passes
-    straight to whatever is underneath. It stays clearly readable by
-    default and *fades* when the cursor moves over it, so you can see what
-    it is covering at the moment you reach for it.
+    Shown on **every** monitor, not just the primary one. First real-use
+    feedback was that the warning fired correctly and went unnoticed
+    entirely: it was a small toast in one corner of one screen while the
+    work was happening on another.
+
+    So it now arrives with an **attention pass** — large and centred on
+    each screen, then shrinking as it travels to the bottom-right corner,
+    where it stays for the rest of the countdown. Motion in the middle of
+    the screen is hard to miss; a static corner toast plainly was not.
+
+    It must not steal focus or block anything — the whole point is letting
+    you wrap up first — so it is **click-through**: every click passes
+    straight to whatever is underneath. It stays clearly readable and
+    *fades* when the cursor moves over it, so you can see what it covers
+    at the moment you reach for it.
 
     Because a click-through window receives no mouse events, `<Enter>` and
-    `<Leave>` never fire on it. Hover is therefore detected by polling the
-    global cursor position against the banner's rectangle.
+    `<Leave>` never fire. Hover is detected by polling the cursor position
+    against each banner's rectangle.
     """
 
     BG = "#2b2113"
     FG = "#ffd8a8"
 
+    #: The attention pass. Long enough to register while looking elsewhere,
+    #: short enough not to sit over the work being wrapped up.
+    HOLD_SECONDS = 1.4
+    TRAVEL_SECONDS = 0.9
+    BIG_SCALE = 4.5
+    BASE_FONT = 14
+    FRAME_MS = 25
+
     def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
         self._root = root
         self._config = config
-        self._window: tk.Toplevel | None = None
-        self._label: tk.Label | None = None
+        self._windows: list[tk.Toplevel] = []
+        self._labels: list[tk.Label] = []
+        self._rects: list[tuple[int, int, int, int]] = []
         self._poll_job: str | None = None
+        self._anim_job: str | None = None
+        self._started_at = 0.0
         self._hovering = False
+        self._text = "Break in 0:00"
 
     def show(self) -> None:
-        if self._window is not None:
+        """Open on every monitor and begin the attention pass."""
+        if self._windows:
             return
+        self._rects = monitor_rects(self._root)
+        self._started_at = time.monotonic()
+        for rect in self._rects:
+            window, label = self._build(rect)
+            self._windows.append(window)
+            self._labels.append(label)
+        self._hovering = False
+        self._schedule_poll()
+        self._animate()
+
+    def _build(self, rect):
         window = tk.Toplevel(self._root)
         window.overrideredirect(True)
         window.attributes("-topmost", True)
@@ -600,44 +633,37 @@ class WarningBanner:
 
         # Seeded with representative text, not "": the window is measured to
         # place it, and an empty label measures as bare padding. Positioning
-        # off that width put the banner's right edge past the monitor and
-        # spilled it onto the next screen once the real text arrived.
-        self._label = tk.Label(
-            window, text="Break in 0:00", font=("Segoe UI", 14, "bold"),
+        # off that width once put the right edge past the monitor and
+        # spilled the banner onto the next screen.
+        label = tk.Label(
+            window, text=self._text,
+            font=("Segoe UI", int(self.BASE_FONT * self.BIG_SCALE), "bold"),
             bg=self.BG, fg=self.FG, padx=22, pady=14,
         )
-        self._label.pack()
-
-        # Assigned before positioning: _reposition() reads self._window and
-        # would silently do nothing if this came later.
-        self._window = window
+        label.pack()
         window.update_idletasks()
-        self._reposition()
+        self._place(window, rect, 1.0)
 
         # -alpha must be set before WS_EX_TRANSPARENT is added: setting it is
         # what makes the window layered in the first place.
         window.attributes("-alpha", self._config.banner_alpha)
         self._make_click_through(window)
-        self._hovering = False
-        self._schedule_poll()
+        return window, label
 
     @property
     def visible(self) -> bool:
-        return self._window is not None
+        return bool(self._windows)
 
     def set_text(self, text: str) -> None:
-        """Change the message, keeping it anchored on screen."""
-        if self._label is None or self._window is None:
-            return
-        before = self._window.winfo_reqwidth()
-        self._label.configure(text=text)
-        self._window.update_idletasks()
-        # Widths are stable for the usual M:SS values, but a longer message
-        # widens the text — re-anchor rather than let the banner grow off
-        # the edge of the screen.
-        if self._window.winfo_reqwidth() != before:
-            self._reposition()
-        self._window.attributes("-topmost", True)
+        """Change the message on every screen, keeping each anchored."""
+        self._text = text
+        for window, label in zip(self._windows, self._labels):
+            before = window.winfo_reqwidth()
+            label.configure(text=text)
+            window.update_idletasks()
+            if window.winfo_reqwidth() != before:
+                self._reposition()
+            window.attributes("-topmost", True)
 
     def tick(self, remaining: float) -> None:
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
@@ -649,29 +675,73 @@ class WarningBanner:
         Used for the stuck-device warning (SPEC §3), which would otherwise
         only reach a console nobody is looking at.
         """
-        if self._window is None:
+        if not self._windows:
             self.show()
         self.set_text(text)
 
     def hide(self) -> None:
-        if self._poll_job is not None:
-            self._root.after_cancel(self._poll_job)
-            self._poll_job = None
-        if self._window is not None:
-            self._window.destroy()
-            self._window = None
-        self._label = None
+        for job in (self._poll_job, self._anim_job):
+            if job is not None:
+                try:
+                    self._root.after_cancel(job)
+                except Exception:
+                    pass
+        self._poll_job = self._anim_job = None
+        for window in self._windows:
+            window.destroy()
+        self._windows = []
+        self._labels = []
 
-    # -- internals ----------------------------------------------------
+    # -- the attention pass -------------------------------------------
+
+    def _animate(self) -> None:
+        """Hold large and centred, then shrink into the bottom-right corner.
+
+        Driven by its own ~40fps timer rather than the app's one-second
+        tick, which is far too coarse for motion.
+        """
+        if not self._windows:
+            return
+        elapsed = time.monotonic() - self._started_at
+        progress = (elapsed - self.HOLD_SECONDS) / self.TRAVEL_SECONDS
+        if progress >= 1.0:
+            self._apply(1.0)      # resident: small, bottom-right
+            self._anim_job = None
+            return
+        # Ease-out, so it leaves the centre briskly and settles gently.
+        eased = 0.0 if progress <= 0 else 1 - (1 - progress) ** 3
+        self._apply(eased)
+        self._anim_job = self._root.after(self.FRAME_MS, self._animate)
+
+    def _apply(self, eased: float) -> None:
+        """Position and size every banner for a point in the animation."""
+        scale = self.BIG_SCALE + (1.0 - self.BIG_SCALE) * eased
+        size = max(self.BASE_FONT, int(round(self.BASE_FONT * scale)))
+        for window, label, rect in zip(self._windows, self._labels, self._rects):
+            if label.cget("font") != f"{{Segoe UI}} {size} bold":
+                label.configure(font=("Segoe UI", size, "bold"))
+            window.update_idletasks()
+            self._place(window, rect, eased)
+
+    def _place(self, window, rect, eased: float) -> None:
+        """Interpolate between the centre of `rect` and its bottom-right."""
+        left, top, width, height = rect
+        w = window.winfo_reqwidth()
+        h = window.winfo_reqheight()
+        margin = 24
+        centre_x = left + (width - w) // 2
+        centre_y = top + (height - h) // 2
+        corner_x = left + width - w - margin
+        corner_y = top + height - h - margin
+        x = int(centre_x + (corner_x - centre_x) * eased)
+        y = int(centre_y + (corner_y - centre_y) * eased)
+        window.geometry(f"+{x}+{y}")
 
     def _reposition(self) -> None:
-        """Anchor to the top-right of the primary monitor, fully on-screen."""
-        if self._window is None:
-            return
-        margin = 24
-        left, top, width, _height = primary_rect(self._root)
-        x = left + width - self._window.winfo_reqwidth() - margin
-        self._window.geometry(f"+{x}+{top + margin}")
+        """Re-anchor after the text changes width, without re-animating."""
+        eased = 0.0 if self._anim_job is not None else 1.0
+        for window, rect in zip(self._windows, self._rects):
+            self._place(window, rect, eased)
 
     @staticmethod
     def _make_click_through(window: tk.Toplevel) -> None:
@@ -703,27 +773,39 @@ class WarningBanner:
         )
 
     def _poll_hover(self) -> None:
-        """Fade the banner while the cursor is over it."""
-        if self._window is None:
+        """Fade whichever banner the cursor is over.
+
+        Faded individually rather than all at once: the cursor can only be
+        over one screen, and dimming the others would hide the warning on
+        the screen you are *not* looking at — the exact failure this
+        redesign was for.
+        """
+        if not self._windows:
             return
         try:
             import win32api
 
             x, y = win32api.GetCursorPos()
-            wx, wy = self._window.winfo_rootx(), self._window.winfo_rooty()
-            over = (
-                wx <= x < wx + self._window.winfo_width()
-                and wy <= y < wy + self._window.winfo_height()
-            )
-        except (ImportError, tk.TclError):
-            over = False
+        except ImportError:
+            self._schedule_poll()
+            return
 
-        if over != self._hovering:
-            self._hovering = over
-            self._window.attributes(
-                "-alpha",
-                self._config.banner_alpha_hover
-                if over
-                else self._config.banner_alpha,
-            )
+        any_hover = False
+        for window in self._windows:
+            try:
+                wx, wy = window.winfo_rootx(), window.winfo_rooty()
+                over = (
+                    wx <= x < wx + window.winfo_width()
+                    and wy <= y < wy + window.winfo_height()
+                )
+                window.attributes(
+                    "-alpha",
+                    self._config.banner_alpha_hover
+                    if over
+                    else self._config.banner_alpha,
+                )
+                any_hover = any_hover or over
+            except tk.TclError:
+                continue
+        self._hovering = any_hover
         self._schedule_poll()

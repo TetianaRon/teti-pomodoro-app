@@ -30,7 +30,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import runtime, summary, tray, walking
+from . import runtime, sounds, summary, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -84,6 +84,14 @@ class Application:
         )
         self._last_snapshot = 0.0
         self._logged_day_type = ""
+        # Resolved once: a missing file should be reported at startup, not
+        # discovered as silence at the moment a break lands.
+        self._sound_start = sounds.resolve(
+            self.settings.break_start_sound, sounds.DEFAULT_START
+        )
+        self._sound_end = sounds.resolve(
+            self.settings.break_end_sound, sounds.DEFAULT_END
+        )
 
         self._root = tk.Tk()
         self._root.withdraw()  # the controller window is never shown
@@ -498,6 +506,10 @@ class Application:
         # Start and stop are recorded so a gap in the log can be told from
         # a crash: a start with no matching stop is the app dying.
         self.history.record(history_module.APP_STARTED)
+        for label, path in (("break start", self._sound_start),
+                            ("break end", self._sound_end)):
+            if path is None:
+                self._log(f"no {label} sound — drop a file in assets/")
         self._log(
             f"watching for activity — "
             f"{self.config.work_duration / 60:.0f}m work / "
@@ -602,6 +614,7 @@ class Application:
         elif event is Event.BREAK_STARTED:
             kind = "long break" if snapshot.is_long_break else "break"
             self._log(f"{kind} started — locking")
+            sounds.play(self._sound_start)
             self.banner.hide()
             if not self.dry_run:
                 # remaining == the full break length at the moment it starts,
@@ -611,6 +624,7 @@ class Application:
             self._log(
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"
             )
+            sounds.play(self._sound_end)
             self.history.record(
                 history_module.BREAK_TAKEN,
                 detail="long" if snapshot.is_long_break else "short",
@@ -717,6 +731,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         help="print the last N raw events — the view for chasing a bug",
+    )
+    parser.add_argument(
+        "--test-sounds",
+        action="store_true",
+        help="play the break start and end chimes, then exit",
     )
     parser.add_argument(
         "--shortcuts",
@@ -830,6 +849,22 @@ def main(argv: list[str] | None = None) -> int:
                 stamp = at[:19].replace("T", " ")
                 amount = f"{seconds:.0f}s" if seconds is not None else ""
                 print(f"  {stamp}  {kind:16} {amount:>8}  {detail or ''}")
+        return 0
+
+    if args.test_sounds:
+        settings = settings_module.load(path)
+        print(f"looking in {sounds.assets_dir()}\n")
+        for label, configured, stem in (
+            ("break start", settings.break_start_sound, sounds.DEFAULT_START),
+            ("break end", settings.break_end_sound, sounds.DEFAULT_END),
+        ):
+            found = sounds.resolve(configured, stem)
+            if found is None:
+                print(f"  {label:12}: none found — add {stem}.mp3 to assets/")
+                continue
+            print(f"  {label:12}: {found.name}  playing…")
+            sounds.play(found)
+            time.sleep(3.5)
         return 0
 
     if args.shortcuts:
