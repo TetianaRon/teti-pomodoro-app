@@ -12,7 +12,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 4. ✅ Daily work cap + Emergency Mode — complete 2026-08-09
 5. ✅ Focus Mode — complete 2026-08-09
 6. ✅ Walking/standing-desk manual tracking (toggle + 60 min/day tally + live effective work-cap formula) — complete 2026-08-09
-7. 🔄 Local history log + tray summary view — tray icon and menu built 2026-08-09; SQLite history log still to do
+7. ✅ Local history log + tray summary view — complete 2026-08-09. Tray icon and menu built earlier; SQLite log records both the user's actions and **the app's own decisions** (day classification, computed cap, start/stop), so the accounting bugs this app is prone to — the ones that take days to surface — are auditable rather than gone at midnight. Read with `--history [DAYS]` and `--events [N]`.
 8. ✅ Packaging / daily launch — complete 2026-08-09. **Resolved as a Startup shortcut, not an `.exe`:** an unsigned PyInstaller build was made successfully and then blocked outright by the machine's security tooling, a well-known false positive. On a single-machine personal app, clearing that needs IT involvement for no benefit, while a Startup-folder shortcut to the venv's `pythonw.exe` starts at login with no console, no unsigned binary, and no rebuild step. `pomodoro-guardian.spec` is kept for the day it might need to run without Python. First-run setup was built early (see below).
 
 ## Architectural decisions
