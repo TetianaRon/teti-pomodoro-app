@@ -75,6 +75,26 @@ in that file, not in the window.
 it can read the whole calendar. It is stored outside the repo for exactly
 that reason; don't paste it into a file here.
 
+## Running it every day
+
+Use the tray menu's **Start with Windows**. That drops a shortcut in your
+Startup folder pointing at the venv's `pythonw.exe`, so it launches at login
+with no console window, and picks up code changes on the next start with
+nothing to rebuild.
+
+An unsigned PyInstaller build was tried first and blocked outright by the
+machine's security tooling — a well-known false positive, since the
+bootloader pattern is shared with real packers. `pomodoro-guardian.spec` is
+kept and does work, but only matters if the app ever has to run somewhere
+without a Python environment.
+
+The tray icon starts in the overflow area (`^`). Drag it onto the taskbar to
+pin it; Windows remembers that across restarts. Apps cannot promote
+themselves out of the overflow — that choice is deliberately the user's.
+
+Logs go to the console when run from a terminal, and to
+`%APPDATA%\PomodoroGuardian\pomodoro.log` when there isn't one.
+
 **The lock is real** — it covers every monitor and blocks keyboard and mouse.
 Ctrl+Alt+Del still works and always will. While `--no-safety-unlock` is off
 (the default), holding Escape for 3 seconds also releases it; that hatch

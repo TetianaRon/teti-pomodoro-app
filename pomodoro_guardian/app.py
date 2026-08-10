@@ -29,7 +29,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import tray, walking
+from . import runtime, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, State
 
@@ -232,6 +232,13 @@ class Application:
                 self._stop_focus()
             elif action == tray.OPEN_SETTINGS:
                 self._open_settings()
+            elif action == tray.TOGGLE_STARTUP:
+                now_on = runtime.set_start_with_windows(
+                    not runtime.starts_with_windows()
+                )
+                self._log(
+                    f"start with Windows: {'on' if now_on else 'off'}"
+                )
             elif action == tray.SET_DAY_OFF:
                 self._set_override(state_module.NON_WORKING)
             elif action == tray.SET_WORKING_DAY:
@@ -305,6 +312,7 @@ class Application:
             status.focus_label = "Focus Mode — used today"
             status.focus_enabled = False
         status.override = self._state.day_type_override
+        status.starts_with_windows = runtime.starts_with_windows()
         status.raises_left = max(
             0,
             self.settings.override_raises_per_month
@@ -685,6 +693,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     path = args.config or settings_module.default_path()
 
+    # A packaged build has no console, so the log has to go somewhere it
+    # can be read after the fact.
+    if runtime.frozen():
+        runtime.redirect_output()
+
+    # Two copies would each install a global input hook and fight over the
+    # lock overlay — the worst thing to get wrong in this app.
+    instance = runtime.SingleInstance()
+    if not instance.acquire():
+        print("another copy is already running")
+        return 0
+
     # First run, or an explicit --setup: show the window before anything
     # else starts, so the settings the app runs on are the ones just saved.
     first_run = not settings_module.exists(path)
@@ -729,4 +749,6 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         app.shutdown()
         print("\nstopped")
+    finally:
+        instance.release()
     return 0

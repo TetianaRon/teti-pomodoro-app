@@ -25,6 +25,7 @@ STOP_WALK = "stop_walk"
 START_FOCUS = "start_focus"
 STOP_FOCUS = "stop_focus"
 OPEN_SETTINGS = "open_settings"
+TOGGLE_STARTUP = "toggle_startup"
 SET_DAY_OFF = "set_day_off"
 SET_WORKING_DAY = "set_working_day"
 CLEAR_OVERRIDE = "clear_override"
@@ -77,6 +78,7 @@ class TrayStatus:
         self.focus_enabled = True
         self.override = None          # None / "working" / "non_working"
         self.raises_left = 0
+        self.starts_with_windows = False
         self.colour = IDLE
 
 
@@ -187,6 +189,10 @@ class TrayIcon:
                  checked=lambda _: self.status.override is None, radio=True),
             Menu.SEPARATOR,
             Item("Settings…", post(OPEN_SETTINGS)),
+            Item(
+                "Start with Windows", post(TOGGLE_STARTUP),
+                checked=lambda _: self.status.starts_with_windows,
+            ),
             Item("Quit", post(QUIT)),
         )
 
