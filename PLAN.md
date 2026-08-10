@@ -188,7 +188,11 @@ New modules: `calendar_watch.py` (background refresh, cached, stale data ignored
 
 **The diagnostic method mattered more than the diagnostics.** Three timed on-screen tests produced no usable data at all, because the prompts print to a console that is behind the lock. Only when the contributor ran `local/checklock.py` themselves — seeing prompts live, and the script reporting afterwards — did each stage become separable. Worth reusing for anything that only runs behind a lock.
 
-**Still unverified:** the calendar meeting skip has never fired live, since no meeting was in progress during testing. Same profile as the bugs above — a path that has not actually executed.
+**Calendar meeting skip verified live (2026-08-09)** against a placeholder event, in two passes. `--exclusions` reported the meeting through the real `CalendarWatcher` → `MeetingDetector` → `CombinedDetector` chain, and a second pass drove `Application._tick` directly: the detector resolved to `CombinedDetector`, the engine reported `excluded=True` on the first tick, and the log printed `holding off — meeting in progress (starting 20:20)` once rather than every tick. The engine correctly stayed in `IDLE` — while excluded it will not start a work session from activity.
+
+The **10-minute lead window** was confirmed in the same run: the hold began before the meeting started, and the message distinguished the states ("starting 20:20" rather than "until 21:20"), which would otherwise have misdescribed a pre-meeting hold as the meeting itself.
+
+Google's `basic.ics` published both the original and the rescheduled event within a couple of minutes each time, so feed lag is not the obstacle it was expected to be. **Phase 3 now has no unverified paths.**
 
 **Next:** Phase 4 — daily work cap + Emergency Mode (docs/SPEC.md §5, §5a). The pieces are in place: `settings.py` holds the caps, `state.py` holds the daily tallies, and `calendar_feed.py` parses the blocks the day-off rule needs.
 
