@@ -15,6 +15,69 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 7. ✅ Local history log + tray summary view — complete 2026-08-09. Tray icon and menu built earlier; SQLite log records both the user's actions and **the app's own decisions** (day classification, computed cap, start/stop), so the accounting bugs this app is prone to — the ones that take days to surface — are auditable rather than gone at midnight. Read with `--history [DAYS]` and `--events [N]`.
 8. ✅ Packaging / daily launch — complete 2026-08-09. **Resolved as a Startup shortcut, not an `.exe`:** an unsigned PyInstaller build was made successfully and then blocked outright by the machine's security tooling, a well-known false positive. On a single-machine personal app, clearing that needs IT involvement for no benefit, while a Startup-folder shortcut to the venv's `pythonw.exe` starts at login with no console, no unsigned binary, and no rebuild step. `pomodoro-guardian.spec` is kept for the day it might need to run without Python. First-run setup was built early (see below).
 
+## Handoff — start here in a fresh session
+
+**State: all 8 phases complete and in daily use.** 235 tests, pyflakes clean,
+`main` clean and pushed. The app runs from a Startup shortcut at login; there is
+no build step.
+
+### Run it
+```
+.venv\Scripts\python.exe -m pomodoro_guardian            # the app
+.venv\Scripts\python.exe -m pytest tests                 # 235 tests
+.venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
+```
+Diagnostics, all safe while the app is running: `--history [DAYS]`,
+`--events [N]`, `--exclusions`, `--test-sounds`, `--shortcuts`, `--setup`.
+
+### The work now is feedback-driven, not phase-driven
+Every phase is built. What changes the app from here is **using it and
+reporting what happens** — which is how the last dozen commits were found. The
+numbers are all still guesses: 12h cap, 50 min walking, 25/5, 11:45/15:20
+reminders, 90s input gap, 1.4s banner hold.
+
+### Unverified on hardware (the only outstanding risk)
+The lock screen's **`M` (media) and `W` (stop treadmill timer)** keys share one
+key-routing path and neither has run for real. `local/checkmedia.py` exercises
+`M`; start a walk from the tray first and one lock covers both. `M` also lifts
+keyboard suppression for a few milliseconds — the script reports whether it
+came back intact, which is the failure that would matter.
+
+### Two habits that account for most bugs found
+1. **Assert on the rendered result, not the requested one.** Geometry checks
+   passed through three separate layout bugs.
+2. **Check the data before writing the rule**, and prefer running a thing to
+   reviewing it. Roughly a dozen bugs were invisible to review and to unit
+   tests: they needed a live call, a real keyboard, a playing video, an evening
+   clock.
+
+### Interactive checks live in `local/` (gitignored)
+`checklock.py`, `checkmedia.py`, `checkwalk.py`. Run **by the contributor**, not
+by the agent: timed on-screen tests failed three times because their prompts
+print to a console sitting behind the lock. The script prints what it saw
+afterwards.
+
+### Landmines
+- **`git add -A` is dangerous here.** It once committed five stock mp3s to a
+  public repo; they were purged from history with `git-filter-repo` and
+  force-pushed. `assets/sound-effects/` is gitignored. Check `git status`
+  before staging wholesale.
+- **`VK_MEDIA_PLAY_PAUSE` is a toggle**, and the only mechanism that reaches
+  Chrome. Three bugs trace to that. Auto-pausing is now off by default and the
+  lock offers `M` instead — do not reintroduce automatic firing without
+  re-reading docs/SPEC.md §2.3.
+- **Never call tkinter from a non-UI thread.** pynput listeners and pystray
+  both run on their own threads and post to a queue the tick drains.
+  `root.after()` from a listener raises "main thread is not in main loop".
+- `local/calendar.ics` and the secret iCal URL in `%APPDATA%` are credentials.
+- Moving or renaming the repo silently breaks all three shortcuts; re-run
+  `--shortcuts` and re-toggle Start with Windows.
+
+### Where state lives
+`%APPDATA%\PomodoroGuardian\` — `config.json` (settings, hand-editable),
+`state.json` (today's tallies plus rolling budgets), `history.db` (append-only
+log), `pomodoro.log` (text log, written when there is no console).
+
 ## Architectural decisions
 
 - **Tech stack:** Python, packaged via PyInstaller to a standalone `.exe`.
@@ -209,6 +272,40 @@ Google's `basic.ics` published both the original and the rescheduled event withi
 **Still open:** Phase 5 (Focus Mode) is unbuilt; Phase 7's SQLite history log is unbuilt; Phase 8 packaging untouched. Settings apply unevenly by design — caps, walking and calendar values are re-read each tick, while rhythm and lock values are baked in at construction and need a restart, which the app says rather than silently ignoring half an edit.
 
 **Verified on the machine:** the tray icon appears, the menu opens on **left click** (the `WM_LBUTTONUP` remap works), every menu item behaves — both walk sessions tracked, and all three day-type override states applied and reverted, including falling back to `day off (weekend)` when the override was cleared on a Sunday. Dragging the icon out of the overflow pins it, and the pin survives a restart.
+
+### Session close — 2026-08-10 (first day of live use)
+
+The app ran through a real working day, and that produced more real bugs than
+any amount of review had. All eight phases were already complete at the start
+of the day; everything since has been feedback.
+
+**Found by using it:**
+- The 2-minute warning fired correctly and went **unnoticed** — a small static
+  toast on one screen while the work was on another. Now shown on every
+  monitor, arriving large and centred before shrinking into the corner.
+- A **paused browser video started playing** on a break. The break chime played
+  first, the audio guard heard it, and the toggle un-paused the video. Fixed by
+  excluding our own process from the guard *and* chiming after the lock — then
+  superseded by making media pause a lock-screen key rather than automatic.
+- **`excluded — presenting` fired three times in eight seconds** with nothing
+  presented. `QUNS_BUSY` covers any full-screen window, this app's own lock
+  included. The whole presenting check was then removed as redundant.
+- Reading-heavy work under-counted, because a 30s input gap stopped the clock
+  mid-message. Now 90s.
+- CLI output vanished into the log file, and `--exclusions` was refused while
+  the app was running. Both regressions from the same logging change.
+- Five stock mp3s were committed to a **public** repo by `git add -A`, contrary
+  to the Pixabay licence. Purged from history and force-pushed.
+
+**Contributor decisions that improved the design**, each overriding what was
+built: media pause as an offered key rather than a guess; the treadmill timer
+stoppable from the lock, since over-counting walking *raises* the work cap;
+selectable chimes rather than a filename convention; and asking whether the
+presenting exception was needed at all, which it was not.
+
+**Next:** nothing is queued. Use it, read `--history`, and change the numbers
+that turn out to be wrong. The one outstanding verification is the lock
+screen's `M` and `W` keys — see the Handoff section above.
 
 ### Session close — 2026-08-09 (second sitting)
 
