@@ -342,6 +342,16 @@ Separate from break enforcement entirely (not a break variant): a **60 minutes/d
 
 **Camera automation — explored and ruled out (not just deferred).** Two automated approaches were considered against the Tapo camera feed: a calibrated desk-height classifier, and pose-estimation-based leg-motion detection (e.g. MediaPipe). Both were rejected for a concrete hardware reason, not just effort: the available camera views only show the upper body / desk-top area, not the legs or the desk's actual under-desk position, so neither approach has the visual signal it needs to work reliably. This isn't a "maybe later, if effort allows" item — it's blocked on camera placement/coverage. It could be revisited only if a camera with a genuine full-body view became available.
 
+**Walking continues through a break, and can be stopped from the lock
+(2026-08-10).** A break takes the screen away; it does not mean you stepped off
+the treadmill, so the timer keeps counting — which is right for the common
+case. But the walk prompt and the tray are both behind the lock, and the mouse
+is suppressed, so a walk that *ended* mid-break could not be stopped until the
+lock lifted: up to 5 minutes over-counted on a short break, 15 on a long one.
+Over-counted walking shrinks the shortfall and therefore **raises** the work
+cap, which is the direction that undermines the goal. The lock screen now shows
+the running total and offers `W` to stop the timer, alongside `M` for media.
+
 **Consequence for missing the target — dynamic, proportional daily cap reduction.** This is the mechanism that gives the goal real teeth, and it's the one place walking tracking connects back to §5's work cap:
 
 ```

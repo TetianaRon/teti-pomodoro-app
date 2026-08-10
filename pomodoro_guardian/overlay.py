@@ -286,6 +286,8 @@ class LockOverlay:
         skip_offer: "callable | None" = None,
         on_skip: "callable | None" = None,
         on_emergency: "callable | None" = None,
+        walk_state: "callable | None" = None,
+        on_stop_walk: "callable | None" = None,
     ) -> None:
         self._root = root
         self._config = config
@@ -295,6 +297,13 @@ class LockOverlay:
         self._skip_offer = skip_offer
         self._on_skip = on_skip
         self._on_emergency = on_emergency
+        # Walking keeps counting through a break — you are still walking —
+        # but the prompt and the tray are both behind the lock, so without
+        # a key here a walk that ended mid-break would over-count by up to
+        # the whole break. That error raises the work cap, which is the
+        # direction that undermines the goal.
+        self._walk_state = walk_state
+        self._on_stop_walk = on_stop_walk
         self._windows: list[tk.Toplevel] = []
         self._countdowns: list[tk.Label] = []
         self._hints: list[tk.Label] = []
@@ -370,6 +379,14 @@ class LockOverlay:
         text = f"{minutes:02d}:{seconds:02d}"
         for countdown in self._countdowns:
             countdown.configure(text=text)
+        # Refreshed here as well: the walking total climbs during a break,
+        # and a "W to stop" hint that never appeared would be useless if the
+        # walk started after the lock went up.
+        if not self._menu_open:
+            hint = self._hint_text()
+            for label in self._hints:
+                if label.cget("text") != hint:
+                    label.configure(text=hint)
         # Something else going topmost mid-break would defeat the lock, so
         # we take the z-order back on every tick rather than trusting the
         # attribute to hold for the whole break.
@@ -435,7 +452,7 @@ class LockOverlay:
 
         # Offered, not fired automatically: see _media_key.
         hint = tk.Label(
-            body, text="M   pause or resume media",
+            body, text=self._hint_text(),
             font=("Segoe UI", pt(12)), bg=self.BG, fg=self.MUTED,
         )
         hint.pack(pady=(28, 0))
@@ -501,6 +518,8 @@ class LockOverlay:
                     # hold which opened the menu has ended.
                     self._swallow_escape = False
             elif kind == "key":
+                if self._walk_key(char):
+                    continue
                 if not self._media_key(char, name):
                     self._menu_key(char, name)
 
@@ -522,6 +541,35 @@ class LockOverlay:
             media.send_mute if mute else media.send_play_pause
         )
         self._flash("muted" if mute else "media toggled")
+        return True
+
+    def _hint_text(self) -> str:
+        """The key hints, including the walking line only while walking."""
+        parts = ["M   pause or resume media"]
+        walking, seconds = self._walking_now()
+        if walking:
+            parts.append(
+                f"W   stop the treadmill timer  ({seconds / 60:.0f} min so far)"
+            )
+        return "\n".join(parts)
+
+    def _walking_now(self) -> tuple[bool, float]:
+        if self._walk_state is None:
+            return False, 0.0
+        try:
+            return self._walk_state()
+        except Exception:  # pragma: no cover - a hint must not break the lock
+            return False, 0.0
+
+    def _walk_key(self, char: str | None) -> bool:
+        """W stops the treadmill timer. True if the key was consumed."""
+        if (char or "").lower() != "w":
+            return False
+        walking, _ = self._walking_now()
+        if not walking or self._on_stop_walk is None:
+            return False
+        self._on_stop_walk()
+        self._flash("treadmill timer stopped")
         return True
 
     def _flash(self, message: str) -> None:

@@ -158,6 +158,60 @@ def test_the_menu_can_be_reopened_after_being_dismissed():
     assert overlay.menus_built == 2
 
 
+class WalkingOverlay(Overlay):
+    """Overlay with a walk in progress, and the media path stubbed out."""
+
+    def __init__(self, walking=True, seconds=23 * 60):
+        self.stopped = []
+        super().__init__()
+        self._walk_state = lambda: (walking, seconds)
+        self._on_stop_walk = lambda: self.stopped.append(True)
+        self._hints = []
+
+    def _media_key(self, char, name):
+        return False
+
+
+def test_w_stops_the_treadmill_timer_during_a_break():
+    """The prompt and tray are both behind the lock, so W is the only way.
+
+    Without it, a walk that ended mid-break over-counts by up to the whole
+    break — and over-counted walking raises the work cap.
+    """
+    overlay = WalkingOverlay()
+    press(overlay, char="w")
+    overlay._drain()
+
+    assert overlay.stopped == [True]
+
+
+def test_w_does_nothing_when_not_walking():
+    overlay = WalkingOverlay(walking=False)
+    press(overlay, char="w")
+    overlay._drain()
+
+    assert overlay.stopped == []
+
+
+def test_the_hint_mentions_stopping_only_while_walking():
+    assert "treadmill" in WalkingOverlay()._hint_text()
+    assert "treadmill" not in WalkingOverlay(walking=False)._hint_text()
+
+
+def test_the_hint_shows_how_long_the_walk_has_run():
+    assert "23 min" in WalkingOverlay(seconds=23 * 60)._hint_text()
+
+
+def test_w_is_still_available_with_the_skip_menu_open():
+    overlay = WalkingOverlay()
+    hold(overlay)
+    press(overlay, char="w")
+    overlay._drain()
+
+    assert overlay.stopped == [True]
+    assert overlay._menu_open, "stopping a walk should not dismiss the menu"
+
+
 def test_ordinary_keys_leave_the_menu_alone():
     overlay = Overlay()
     hold(overlay)

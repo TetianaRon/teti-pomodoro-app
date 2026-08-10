@@ -104,6 +104,8 @@ class Application:
             skip_offer=self._skip_offer,
             on_skip=self._take_skip,
             on_emergency=self._take_emergency,
+            walk_state=self._walk_state,
+            on_stop_walk=self._stop_walk,
         )
         self.banner = WarningBanner(self._root, config)
         self.tray_status = tray.TrayStatus()
@@ -173,6 +175,14 @@ class Application:
         )
 
     # -- walking (SPEC §7) --------------------------------------------
+
+    def _walk_state(self) -> tuple[bool, float]:
+        """Whether a walk is running, and how long it has run.
+
+        Read by the lock screen, which offers a key to stop it — the walk
+        prompt and the tray are both unreachable behind a lock.
+        """
+        return self._state.walking, self._state.walked_including_current()
 
     def _start_walk(self) -> None:
         self._state = self._state.start_walk()
