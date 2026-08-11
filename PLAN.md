@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 255 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 308 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,11 +25,23 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 255 tests
+.venv\Scripts\python.exe -m pytest tests                 # 308 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
-Diagnostics, all safe while the app is running: `--history [DAYS]`,
+Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
 `--events [N]`, `--exclusions`, `--test-sounds`, `--shortcuts`, `--setup`.
+
+### A macOS port is being handed to someone else
+A colleague with the same overfocusing problem is porting this to a Mac on her
+own machine, with her own Claude account — she is not a developer, and there is
+no Mac here to test on. **`docs/MAC-PORT.md` is the whole handover**; read it
+before touching anything platform-specific.
+
+What that changed on this side: `platform.py` names all 13 platform
+capabilities and `--doctor` reports them; `activity.py` gained an idle-time
+seam whose macOS half needs no permission; and the lock's degraded mode is
+now safe rather than a trap. **The app is expected to run with pieces
+missing** — that is deliberate, and `--doctor` is what keeps it honest.
 
 ### The work now is feedback-driven, not phase-driven
 Every phase is built. What changes the app from here is **using it and
@@ -72,6 +84,14 @@ afterwards.
   at a scratch directory and assert `app.history.path` is inside it before
   ticking. A test run once put a zeroed snapshot into a real working day, which
   made the day's walking total read 0 min. See `ISSUES.md`.
+- **The lock screen's own key bindings look redundant. They are not.**
+  `LockOverlay._bind_local_keys` is installed on every break, including ones
+  that suppress input properly, and looks like it should be conditional. It
+  must stay unconditional: while suppression works the keystroke never reaches
+  a window, so the bindings are inert, and that self-selection is the only
+  cover for a hook that starts cleanly and then receives nothing — which no
+  return value can detect. Making it conditional restores a full-screen window
+  with no way out.
 - **Never call tkinter from a non-UI thread.** pynput listeners and pystray
   both run on their own threads and post to a queue the tick drains.
   `root.after()` from a listener raises "main thread is not in main loop".
@@ -128,6 +148,72 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### Session close — 2026-08-10 (third sitting: prepared for a macOS port)
+
+**Why:** a colleague with the same overfocusing problem wants the app, and
+works on a Mac. There is no Mac here to test on, and no way to borrow one — the
+only Mac available belongs to someone without a Claude account, and this
+account is JumpCloud-gated, which is not going onto a personal machine. So
+**she ports it herself**, on her machine, with her own Claude session. She is
+not a developer. Everything this sitting produced exists to make that safe and
+small.
+
+**Measured before planning.** ~2,900 of ~6,000 lines are fully portable,
+including the whole brain and every test. ~600 lines touch Windows. Two items
+are not translations: the menu bar (pystray's Cocoa backend wants the main
+thread and tkinter already owns it) and camera/mic detection (no registry
+equivalent; the calendar meeting skip covers scheduled calls in the meantime).
+Also confirmed by grep rather than assumed: **no absolute paths anywhere** —
+every path derives from `__file__` or an env var, and `settings.py` already
+falls back to `~/.config` with no `%APPDATA%`. The folder name is a non-issue.
+
+**A trap, found by tracing the permission failure.** The lock's degraded mode
+("the overlay still covers the screen, it just won't block input") only caught
+`ImportError`. A refused macOS Accessibility permission is not one, so the
+exception would escape `lock()` — called from the tick, whose last statement
+schedules the next tick. The loop would stop rescheduling, leaving a
+borderless, always-on-top, `WM_DELETE_WINDOW`-refused window on every screen
+with nothing alive to remove it. Worse than not locking at all.
+
+Fixed three ways: `start()` reports whether suppression is live and never
+raises; each overlay window binds its **own** key events into the same queue,
+so every gesture works without a global hook; and `tick()` stops reclaiming
+the z-order when nothing is blocked — otherwise it drags a window she is
+allowed to leave back over her work once a second. The bindings are installed
+**unconditionally because they are self-selecting**: while suppression works
+the keystroke never reaches a window, so they are inert. That covers the
+failure no return value can detect — a hook that starts cleanly and receives
+nothing.
+
+**The seam is a registry, not a relocation** — a deliberate reversal after
+reading the code. Every platform call already had a `sys.platform` guard that
+degrades quietly, so per-OS backend modules would have moved working code that
+only a live Windows session can exercise, for tidiness. That is the exact
+shape of most bugs in this project's history. `platform.py` instead names each
+capability with what the app loses without it, where the Windows version
+lives, and how macOS should provide it; `--doctor` probes all 13. The one real
+extraction is idle detection: `activity.py` now asks the OS "how long since
+any input", **which needs no permission on either platform**, where the pynput
+listener fallback would have needed the same permission as the lock.
+`macos_idle_seconds()` is written and marked UNVERIFIED with the command to
+check its format.
+
+**Deliberately not done: writing the macOS implementations blind.** Confident
+platform code that cannot be run is this project's most reliable bug source,
+and she cannot tell wrong code from right code. She gets contracts and
+guidance; her Claude implements on hardware that can run it.
+
+**Verified:** 308 tests (55 new), pyflakes clean, `--doctor` reporting all 13
+capabilities present here, a real cosmetic lock driven against actual tkinter
+on three monitors with suppression forced to fail, a real `Application` ticked
+with the rewritten monitor to confirm the monotonic time base, and the
+shareable `git archive` inspected — 58 files, no chimes (licence), no calendar
+export, no venv.
+
+**Next:** she runs step 0 of `docs/MAC-PORT.md` — asking IT whether
+Accessibility permission can be granted at all. That answer decides whether
+this is a lock or a nudge, and it is worth having before any effort.
 
 ### Session close — 2026-08-10 (second sitting: the rhythm survives a restart)
 
