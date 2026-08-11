@@ -57,6 +57,20 @@ class Config:
     custom_skip_daily_budget: float = 60 * MINUTE
 
     # --- Never-interrupt exclusions (SPEC §3) ---
+    # Whether time on a call counts towards the daily cap. It is work, and
+    # leaving it out let a day of meetings be followed by a full cap's worth
+    # of tracked work on top — which defeated the cap entirely. Measured on
+    # 2026-08-11: an 82-minute meeting credited zero seconds.
+    #
+    # The break still holds off throughout; those are two separate needs
+    # that were conflated. Focus Mode already made this distinction and
+    # says so in timer.py.
+    #
+    # Left switchable because the risk changes direction rather than going
+    # away: a microphone held open by an app that never releases it now
+    # *over*-counts, where before it under-counted. `exclusion_warn_after`
+    # is the guard, and turning this off restores the old behaviour.
+    count_exclusions_as_work: bool = True
     # Which signals hold a break off, read from the registry keys behind
     # Windows' own camera/microphone privacy indicator. A presenting check
     # was tried and removed — see exclusions.py.

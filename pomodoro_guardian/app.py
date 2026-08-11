@@ -81,6 +81,11 @@ class Application:
         self._state = state_module.load(state_file)
         self.engine = PomodoroEngine(config, now=time.monotonic())
         self._excluded_since: float | None = None
+        # Kept apart from `_excluded_since`, which the long-call warning
+        # clears on the tick the call ends — before the event that needs it
+        # is handled.
+        self._exclusion_began: float | None = None
+        self._exclusion_reason = ""
         self._warned_long_exclusion = False
         self._exclusion = Exclusion()
         self._last_worked_total = 0.0
@@ -779,12 +784,32 @@ class Application:
                 ),
             )
         elif event is Event.EXCLUSION_STARTED:
-            self._log(f"holding off — {self._exclusion.describe()}")
+            self._exclusion_began = time.monotonic()
+            self._exclusion_reason = self._exclusion.describe()
+            counted = (
+                "counts as work" if self.config.count_exclusions_as_work
+                else "not counted as work"
+            )
+            self._log(f"holding off — {self._exclusion_reason} ({counted})")
             self.history.record(
-                history_module.EXCLUDED, detail=self._exclusion.describe()
+                history_module.EXCLUDED, detail=self._exclusion_reason
             )
         elif event is Event.EXCLUSION_ENDED:
-            self._log("clear again — countdown resumes")
+            # Recorded with its duration, so a day's meeting hours can be
+            # read rather than inferred from gaps between snapshots — which
+            # is how the 82 minutes that started all this had to be found.
+            held = (
+                time.monotonic() - self._exclusion_began
+                if self._exclusion_began is not None else 0.0
+            )
+            self._log(
+                f"clear again after {_short(held)} — countdown resumes"
+            )
+            self.history.record(
+                history_module.EXCLUSION_ENDED, seconds=held,
+                detail=self._exclusion_reason or "clear",
+            )
+            self._exclusion_began = None
         elif event is Event.WARNING_STARTED:
             self._log(
                 f"break in {self.engine.warning_lead() / 60:.0f} min"

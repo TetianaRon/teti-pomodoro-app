@@ -113,6 +113,10 @@ class PomodoroEngine:
         # delta into a persisted daily total; the engine itself has no idea
         # what day it is and deliberately keeps it that way.
         self.worked_total = 0.0
+        # How much of that came from calls rather than from typing. Kept
+        # apart so a day's hours can be read honestly afterwards: "2.3h
+        # worked, 1.4h of it on calls" says something the total alone hides.
+        self.excluded_total = 0.0
         # Set by the app once the daily cap is exceeded (SPEC §5): work
         # intervals shorten so breaks arrive often enough to be a nudge.
         self.overtime = False
@@ -158,7 +162,7 @@ class PomodoroEngine:
         # A break already under way runs its course — the lock is up, so no
         # call could have started against it. Everything else freezes.
         if self.state is not State.BREAK:
-            frozen = self._apply_exclusion(now, excluded, events)
+            frozen = self._apply_exclusion(now, excluded, events, delta)
             if frozen:
                 return events
 
@@ -245,15 +249,37 @@ class PomodoroEngine:
         )
 
     def _apply_exclusion(
-        self, now: float, excluded: bool, events: list[Event]
+        self, now: float, excluded: bool, events: list[Event], delta: float = 0.0
     ) -> bool:
-        """Handle SPEC §3 freezing. Returns True if the tick should stop here."""
+        """Handle SPEC §3 freezing. Returns True if the tick should stop here.
+
+        Two separate things happen here, and conflating them was a real bug.
+
+        **The break is held off.** That is what an exclusion is for, and the
+        interval is left exactly where it was: `_work_elapsed` never moves,
+        so the countdown resumes from the same place when the call ends.
+
+        **The time still counts as work.** A call is work whether or not
+        anybody is typing, and leaving it out meant a day of meetings could
+        be followed by a full cap's worth of tracked work on top — the cap
+        the app exists to enforce, defeated. Measured on 2026-08-11: an
+        82-minute meeting credited zero seconds, and only 2.3 of 4.7 hours
+        at the desk were counted.
+
+        Credited from `delta` rather than from the input watermark, because
+        the watermark is what deliberately ignores a silent call. `delta` has
+        already been zeroed upstream if the machine slept or the process
+        stalled, so a laptop shut mid-meeting cannot buy hours.
+        """
         if excluded:
             if not self._excluded:
                 self._excluded = True
                 events.append(Event.EXCLUSION_STARTED)
-            # Pin the watermark so the call's duration is never retroactively
-            # credited as work once typing resumes.
+            if self.config.count_exclusions_as_work:
+                self.worked_total += delta
+                self.excluded_total += delta
+            # Pin the watermark either way: the call's duration must never be
+            # credited a *second* time by the input rules once typing resumes.
             self._credited_through = now
             # Don't let a call build toward the start threshold either: a
             # session should begin from real work, not from being on a call.

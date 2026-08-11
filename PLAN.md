@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 356 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 389 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 356 tests
+.venv\Scripts\python.exe -m pytest tests                 # 389 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -155,6 +155,61 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-11 — meetings were invisible to the daily cap
+
+**The best bug found so far, and it came from the contributor reading her own
+tray**: 9am start, no long breaks taken, and only 2.3h tracked by 13:34. Her
+guess — "does the tracker omit the time I spend on meetings if it delays the
+break?" — was exactly right.
+
+The history log settled it in one query. `11:50 excluded — meeting in progress`,
+then **82 minutes at 0% credited**, resuming the moment the call ended. Of 4.7h
+at the desk, 2.0h counted: ~1h20m meeting, ~50m of breaks correctly excluded,
+~20m of reading under the 90s input gap.
+
+**Why it mattered more than a wrong number.** A day of meetings could be
+followed by a *full cap's worth* of tracked work on top. The cap is the whole
+point of the app, and it could be walked straight past by having a normal
+meeting-heavy day.
+
+**The cause was two needs sharing one mechanism.** An exclusion means "do not
+start a break now". It had also come to mean "do not count this time", and
+`_apply_exclusion` returned before any crediting while pinning the watermark
+each tick. Focus Mode had already reasoned this through and *says so in
+timer.py* — "an exclusion freezes the countdown, which would make focus time
+invisible to the daily cap and let a 2h session be worked for free" — and the
+same argument was simply never carried across to exclusions. **The codebase
+had already written down the answer to a bug it was still shipping.**
+
+Now: the interval stays frozen and no break fires, but wall clock accrues
+against the cap, credited from the tick delta rather than the input watermark
+(the watermark being the thing that deliberately ignores a silent call). A
+machine that slept mid-meeting still credits nothing, because `max_tick`
+discarded that delta upstream. Call time is tallied separately and shown by
+`--history` as "1.4h on calls", and `exclusion_ended` records each call's
+duration — previously only the start was logged, which is why the 82 minutes
+had to be reconstructed from snapshot gaps.
+
+**A test asserted the bug.** `test_an_exclusion_still_freezes_even_during_focus`
+said "a call is a call: no work should accrue for it either way", so the suite
+was actively defending the behaviour. Rewritten to assert what an exclusion is
+actually for — the interval does not advance — plus the work that now accrues.
+Worth remembering next time a test blocks a fix: ask which of the two is wrong.
+
+**The risk changed direction rather than disappearing.** A stuck microphone
+used to under-count; now it over-counts, which would shorten every interval to
+five minutes. `count_exclusions_as_work` (`exclusions.count_as_work` in the
+config) is the way out, and the 2h stuck-device warning is the guard. A meeting
+attended from a phone is credited too — accepted knowingly.
+
+**Verified:** 389 tests (11 new), pyflakes clean, and today's real shape
+replayed through both engines — 90 min typing, 82 min meeting, 25 min typing:
+1.60h counted before, 2.97h after, **1.37h recovered**, with three breaks
+firing either way.
+
+**Note:** today's already-recorded 2.3h is not corrected retroactively. The fix
+applies from the next restart.
 
 ### 2026-08-11 — why the pill kept disappearing
 

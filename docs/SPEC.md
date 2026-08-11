@@ -136,6 +136,46 @@ The lock will not trigger — and an in-progress countdown pauses — while:
 
 These are automatic; you don't have to invoke anything for them.
 
+**Time on a call counts as work (fixed 2026-08-11).** An exclusion holds the
+break off. For a long time it also quietly stopped the clock, and those are two
+separate needs that had come to share one mechanism — only the first is what an
+exclusion is for.
+
+Found by using it: an **82-minute meeting credited zero seconds**, and of 4.7
+hours at the desk only 2.3 were counted. The consequence is worse than a wrong
+number, because a day of meetings could then be followed by a *full cap's
+worth* of tracked work on top — the cap the app exists to enforce, walked
+straight past. Focus Mode (§6) had already reasoned this through and says so in
+`timer.py`: "an exclusion freezes the countdown, which would make focus time
+invisible to the daily cap and let a 2h session be worked for free." The same
+argument applies to meetings; it had simply never been carried across.
+
+So while excluded: the interval does not advance and no break fires, but wall
+clock accrues against the daily cap, at wall-clock rate and with nobody typing
+— because listening on a call is work. Credited from the tick delta rather than
+the input watermark, which is precisely the thing that ignores a silent call.
+The watermark is still pinned, so the input rules cannot pay for the same
+minutes a second time once typing resumes, and a machine that slept mid-meeting
+credits nothing because the delta was already discarded upstream (§2.4's
+`max_tick`).
+
+Call time is also tallied on its own and reported by `--history` as "1.4h on
+calls" inside the day's total, because a day that was mostly meetings and a day
+that was mostly typing reach the cap identically and only that line tells them
+apart. `exclusion_ended` now records each call's duration; previously only the
+start was logged, so the 82 minutes above had to be reconstructed from gaps
+between five-minute snapshots.
+
+**The risk changed direction rather than going away**, which is why
+`count_exclusions_as_work` exists (`exclusions.count_as_work` in the config
+file). A microphone held open by an app that never releases it used to
+*under*-count the day; now it *over*-counts, which would push the cap over
+early and shorten every interval to five minutes. `exclusion_warn_after` (2h)
+is the guard, and the setting is the way out. A scheduled meeting attended from
+a phone, or skipped entirely on an awake machine, is credited too — accepted
+knowingly: the alternative is not counting real meetings, which is the bug
+being fixed.
+
 **How it is detected (built 2026-08-09, Phase 2).** Deliberately *not* by
 process name. Maintaining a list of conferencing executables breaks whenever a
 tool is added or renamed, and a running app says nothing about whether a call

@@ -43,8 +43,9 @@ The app has two halves.
 working, the 25/5 rhythm, the long break every 4th cycle, the daily work cap,
 the walking tally, the calendar meeting skip, the history log, the settings
 window — plus reminder mode, and the record of which breaks were actually
-taken rather than worked through. Roughly 3,000 lines and **all 378
-automated tests**. Nothing here needs porting.
+taken rather than worked through, and time on calls counting towards the daily
+cap. Roughly 3,000 lines and **all 389 automated tests**. Nothing here needs
+porting.
 
 **The hands — these touch the operating system.** Blocking input, covering
 every screen, the menu bar icon, playing chimes, detecting the camera and
@@ -106,7 +107,7 @@ automatically — that's expected, not an error.
 .venv/bin/python -m pytest tests
 ```
 
-**You should see 378 passing.** This is the moment worth having early: it
+**You should see 389 passing.** This is the moment worth having early: it
 means every rule about breaks, caps, walking and history is intact on your
 machine, and anything that goes wrong from here is in the OS-facing parts
 only.

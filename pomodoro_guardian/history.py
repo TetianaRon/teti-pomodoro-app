@@ -51,6 +51,10 @@ BREAK_IGNORED = "break_ignored"
 CYCLES_RESET = "cycles_reset"
 CYCLES_RESUMED = "cycles_resumed"
 EXCLUDED = "excluded"
+# The other end of it, with how long the call ran. Only the start was ever
+# recorded, so a day's meeting hours had to be inferred from gaps between
+# snapshots — which is exactly the sort of thing this log exists to spare.
+EXCLUSION_ENDED = "exclusion_ended"
 EMERGENCY_USED = "emergency_used"
 FOCUS_STARTED = "focus_started"
 FOCUS_ENDED = "focus_ended"
@@ -75,6 +79,7 @@ class DaySummary:
     breaks_skipped: int = 0
     breaks_ignored: int = 0
     skipped_seconds: float = 0.0
+    excluded_seconds: float = 0.0      # time on calls, held off from breaks
     emergency_used: int = 0
     focus_used: int = 0
     day_type: str = ""
@@ -82,6 +87,13 @@ class DaySummary:
     def describe(self) -> str:
         parts = [
             f"{self.day}  {self.worked_seconds / 3600:.1f}h worked",
+        ]
+        # Named separately because it is counted *in* the total: a day that
+        # was mostly meetings and a day that was mostly typing reach the cap
+        # the same way, and only this line tells them apart.
+        if self.excluded_seconds:
+            parts.append(f"{self.excluded_seconds / 3600:.1f}h on calls")
+        parts += [
             f"{self.walked_seconds / 60:.0f} min walked",
             f"{self.breaks_taken} breaks",
         ]
@@ -194,7 +206,7 @@ class History:
         except sqlite3.Error:
             return DaySummary(day)
 
-        worked = walked = skipped_seconds = 0.0
+        worked = walked = skipped_seconds = excluded_seconds = 0.0
         taken = skipped = ignored = emergency = focus = 0
         day_type = ""
         for kind, seconds, detail in rows:
@@ -212,6 +224,8 @@ class History:
                 skipped_seconds += seconds or 0
             elif kind == BREAK_IGNORED:
                 ignored += 1
+            elif kind == EXCLUSION_ENDED:
+                excluded_seconds += seconds or 0
             elif kind == WALK_ENDED:
                 walked = max(walked, 0)
             elif kind == EMERGENCY_USED:
@@ -228,6 +242,7 @@ class History:
             breaks_skipped=skipped,
             breaks_ignored=ignored,
             skipped_seconds=skipped_seconds,
+            excluded_seconds=excluded_seconds,
             emergency_used=emergency,
             focus_used=focus,
             day_type=day_type,

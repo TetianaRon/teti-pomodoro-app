@@ -168,15 +168,26 @@ def test_the_break_arrives_immediately_once_focus_ends():
     assert Event.BREAK_STARTED in h.events
 
 
-def test_an_exclusion_still_freezes_even_during_focus():
-    """A call is a call: no work should accrue for it either way."""
+def test_an_exclusion_still_freezes_the_interval_during_focus():
+    """A call still holds the break off, whatever else is running.
+
+    This test used to assert the opposite of its second half — that no work
+    accrued during a call either — which was the bug found on 2026-08-11: an
+    82-minute meeting credited zero seconds and the daily cap could be
+    walked straight past. Focus Mode's own docstring had the right rule all
+    along ("work accrues as normal here — only the break is held back"); it
+    simply had not been applied to exclusions. Both now behave the same way,
+    which is the point.
+    """
     h = Harness()
     h.advance_until(Event.WORK_STARTED, limit=200)
     h.engine.suppress_breaks = True
     before = h.engine.worked_total
+    remaining = h.engine.snapshot().remaining
 
     for _ in range(60):
         h.now += 1
         h.engine.update(h.now, h.last_input, excluded=True)
 
-    assert h.engine.worked_total == before
+    assert h.engine.snapshot().remaining == remaining, "the break advanced"
+    assert h.engine.worked_total - before == pytest.approx(60, abs=2)

@@ -96,6 +96,12 @@ class Settings:
                 "idle_pause_minutes": c.idle_pause_after / MINUTE,
                 "idle_reset_minutes": c.idle_reset_after / MINUTE,
             },
+            "exclusions": {
+                # Time on a call counts towards the daily cap. Turn this off
+                # if a microphone held open by some app starts inflating the
+                # day — the risk this setting exists for.
+                "count_as_work": c.count_exclusions_as_work,
+            },
             "lock": {
                 "block_input": c.block_input,
                 "safety_unlock": c.safety_unlock,
@@ -138,6 +144,7 @@ class Settings:
         detection = _section(data, "detection")
         lock = _section(data, "lock")
         caps = _section(data, "caps")
+        exclusions = _section(data, "exclusions")
         focus = _section(data, "focus")
         walking = _section(data, "walking")
         d = base.config
@@ -163,6 +170,9 @@ class Settings:
             idle_reset_after=_num(
                 detection, "idle_reset_minutes",
                 d.idle_reset_after / MINUTE) * MINUTE,
+            count_exclusions_as_work=bool(
+                exclusions.get(
+                    "count_as_work", d.count_exclusions_as_work)),
             block_input=bool(
                 lock.get("block_input", d.block_input)),
             break_ignored_fraction=_num(
