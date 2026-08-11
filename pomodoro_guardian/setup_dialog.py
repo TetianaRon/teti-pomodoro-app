@@ -77,6 +77,7 @@ class SetupDialog:
             "long_break_every": tk.StringVar(value=str(c.long_break_every)),
             "warning_lead": tk.StringVar(value=_mins(c.warning_lead)),
             "safety_unlock": tk.BooleanVar(value=c.safety_unlock),
+            "block_input": tk.BooleanVar(value=c.block_input),
             "skip_budget": tk.StringVar(
                 value=_mins(c.custom_skip_daily_budget)),
             "overtime": tk.StringVar(
@@ -177,9 +178,21 @@ class SetupDialog:
     def _build_breaks(self, parent, row):
         frame = _section(parent, row, "Skipping a break")
         ttk.Checkbutton(
+            frame, text="Block the keyboard and mouse during a break",
+            variable=self._vars["block_input"],
+        ).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(
+            frame,
+            text=("Off: breaks still cover every screen with a countdown, but "
+                  "you can click away and keep working.\nUseful while you are "
+                  "learning to trust it, or on a day of presentations. Breaks "
+                  "worked through are recorded as such either way."),
+            foreground="#555", justify="left",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
+        ttk.Checkbutton(
             frame, text="Hold Escape during a break to open the skip menu",
             variable=self._vars["safety_unlock"],
-        ).grid(row=0, column=0, columnspan=3, sticky="w")
+        ).grid(row=2, column=0, columnspan=3, sticky="w")
         ttk.Label(
             frame,
             text=("Hold it for 3 seconds and choose 5, 10 or 20 minutes; the "
@@ -187,8 +200,8 @@ class SetupDialog:
                   "a break cannot be skipped at all. Ctrl+Alt+Del always "
                   "works either way."),
             foreground="#555", justify="left",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
-        _field(frame, 2, "Skip budget", self._vars["skip_budget"],
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 8))
+        _field(frame, 4, "Skip budget", self._vars["skip_budget"],
                "minutes/day", "shared across every skip")
 
     def _build_caps(self, parent, row):
@@ -351,6 +364,7 @@ class SetupDialog:
             long_break_every=every,
             warning_lead=lead * MINUTE,
             safety_unlock=bool(self._vars["safety_unlock"].get()),
+            block_input=bool(self._vars["block_input"].get()),
             custom_skip_daily_budget=skip_budget * MINUTE,
             overtime_work_duration=overtime * MINUTE,
         )

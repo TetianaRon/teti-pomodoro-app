@@ -97,10 +97,12 @@ class Settings:
                 "idle_reset_minutes": c.idle_reset_after / MINUTE,
             },
             "lock": {
+                "block_input": c.block_input,
                 "safety_unlock": c.safety_unlock,
                 "safety_unlock_hold_seconds": c.safety_unlock_hold,
                 "banner_alpha": c.banner_alpha,
                 "banner_alpha_hover": c.banner_alpha_hover,
+                "break_ignored_fraction": c.break_ignored_fraction,
             },
             "caps": {
                 "working_day_hours": self.working_day_cap_hours,
@@ -161,6 +163,10 @@ class Settings:
             idle_reset_after=_num(
                 detection, "idle_reset_minutes",
                 d.idle_reset_after / MINUTE) * MINUTE,
+            block_input=bool(
+                lock.get("block_input", d.block_input)),
+            break_ignored_fraction=_num(
+                lock, "break_ignored_fraction", d.break_ignored_fraction),
             safety_unlock=bool(
                 lock.get("safety_unlock", d.safety_unlock)),
             safety_unlock_hold=_num(

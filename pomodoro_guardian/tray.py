@@ -37,14 +37,64 @@ HIGHLIGHT = (224, 106, 92)
 LEAF = (74, 138, 74)
 WALK_BADGE = (46, 190, 110)
 
+#: Countdown plate colours, by what the number means.
+PLATE = {
+    "work": (18, 22, 28),        # minutes until the next break
+    "long": (34, 62, 96),        # ...and the next one is the long break
+    "break": (30, 74, 46),       # minutes left of the break itself
+    "held": (72, 62, 24),        # frozen: a call, or stepped away
+}
+PLATE_TEXT = (255, 255, 255)
 
-def render_icon(walking: bool = False, size: int = 64):
-    """The tomato, with a green badge while walking.
+#: Bold faces to try for the countdown, most platform-native first. A tray
+#: slot is 16px, so the digits have to be a bold face at a real size —
+#: Pillow's built-in bitmap font cannot be scaled up without turning to
+#: mush, and a blurry number is worse than none.
+FONT_CANDIDATES = (
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
+
+
+def _badge_font(pixels: int):
+    """The largest available bold face at `pixels`, or None.
+
+    None means the countdown is simply left off. Falling back to the
+    built-in bitmap font was tried in principle and rejected: at this size
+    it renders as a smear, and an unreadable number in the tray is worse
+    than the plain tomato.
+    """
+    from PIL import ImageFont
+
+    for candidate in FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(candidate, pixels)
+        except OSError:
+            continue
+    return None
+
+
+def render_icon(
+    walking: bool = False,
+    size: int = 64,
+    badge: str = "",
+    tone: str = "work",
+):
+    """The tomato, with a green dot while walking and an optional countdown.
 
     Drawn rather than loaded so the tray needs no file at runtime, and
     supersampled 4× before resizing because the real target is a 16px
     tray slot, where aliasing is the difference between a tomato and a
     smudge.
+
+    `badge` is the minutes remaining, at most two characters. Windows has no
+    way to put text *beside* a tray icon — the notification area takes a
+    16px image and a hover tooltip, nothing else — so the number goes on the
+    icon itself, over a plate dark enough to stay readable against the
+    tomato at that size. That is how battery and CPU meters do it.
     """
     from PIL import Image, ImageDraw
 
@@ -65,13 +115,66 @@ def render_icon(walking: bool = False, size: int = 64):
         fill=LEAF + (255,),
     )
 
+    # The countdown plate goes down before the walking dot, so the dot is
+    # never buried under it. Drawing them the other way round hid the dot
+    # almost entirely, leaving only a sliver at the plate's rounded corner —
+    # which was enough to keep a "they differ" test passing while the thing
+    # it was checking for was invisible.
+    if badge:
+        _draw_badge(draw, badge, tone, box, unit)
+
     if walking:
-        # Ringed in the background colour so the badge stays legible
-        # against the tomato at 16px.
-        draw.ellipse(at(140, 140, 252, 252), fill=(18, 22, 28, 255))
-        draw.ellipse(at(148, 148, 244, 244), fill=WALK_BADGE + (255,))
+        # Ringed in the background colour so the dot stays legible against
+        # the tomato at 16px. Moved clear of the plate while a countdown is
+        # running, since down there it would simply not be seen.
+        # Inset far enough that the ring below still fits the canvas; drawn
+        # past the edge it is silently clipped to a flat side.
+        spot = at(164, 14, 242, 92) if badge else at(140, 140, 246, 246)
+        ring = 6 * unit
+        draw.ellipse(
+            [spot[0] - ring, spot[1] - ring, spot[2] + ring, spot[3] + ring],
+            fill=(18, 22, 28, 255),
+        )
+        draw.ellipse(spot, fill=WALK_BADGE + (255,))
 
     return image.resize((size, size), Image.LANCZOS)
+
+
+def _draw_badge(draw, badge: str, tone: str, box: int, unit: float) -> None:
+    """Lay the countdown across the lower half, on its own plate.
+
+    Across the width rather than in a corner: a corner badge at 16px leaves
+    about 6px for two digits, which is unreadable. Covering the tomato's
+    lower half instead leaves the leaf and shoulders visible — enough to
+    still read as this app — while giving the number room to be legible,
+    which is the entire point of putting it there.
+    """
+    badge = badge[:2]
+    # Sized from the plate, not the icon: two digits need about 10 of the 16
+    # tray pixels in height to be read at a glance, which is most of the
+    # lower two-thirds. Measured by rendering it at 16px and looking, not
+    # calculated — the first attempt at 42% was legible only when zoomed.
+    font = _badge_font(int(box * 0.52))
+    if font is None:
+        return
+
+    plate = PLATE.get(tone, PLATE["work"])
+    # The tomato keeps its top third: leaf, stem and shoulders are enough to
+    # find it by in a row of tray icons, which is the only job that part of
+    # the drawing still has while a countdown is running.
+    top = 96
+    draw.rounded_rectangle(
+        [2 * unit, top * unit, 254 * unit, 252 * unit],
+        radius=26 * unit, fill=plate + (255,),
+    )
+
+    # Centred on the ink's own bounding box rather than on the font's line
+    # metrics: digits carry ascender and descender space they never use, and
+    # centring on those left the number visibly high in the plate.
+    left, upper, right, lower = draw.textbbox((0, 0), badge, font=font)
+    x = (box - (right - left)) / 2 - left
+    y = ((top + 252) / 2) * unit - (lower - upper) / 2 - upper
+    draw.text((x, y), badge, font=font, fill=PLATE_TEXT + (255,))
 
 
 def _left_click_icon(pystray):
@@ -115,6 +218,11 @@ class TrayStatus:
         self.override = None          # None / "working" / "non_working"
         self.raises_left = 0
         self.starts_with_windows = False
+        # The countdown drawn onto the icon: at most two characters, and ""
+        # for none. See render_icon for why it is on the icon rather than
+        # beside it.
+        self.badge = ""
+        self.badge_tone = "work"
 
 
 class TrayIcon:
@@ -126,6 +234,8 @@ class TrayIcon:
         self._icon = None
         self._thread: threading.Thread | None = None
         self._available = False
+        #: What the icon currently shows, so it is only redrawn on a change.
+        self._drawn: tuple | None = None
 
     # -- lifecycle ----------------------------------------------------
 
@@ -172,7 +282,15 @@ class TrayIcon:
         if self._icon is None:
             return
         try:
-            self._icon.icon = self._image(self.status.walking)
+            # Only when what is drawn would actually differ. This runs on
+            # every one-second tick, and the countdown changes once a
+            # minute — handing Windows a new icon 59 times for nothing is
+            # both wasteful and a source of visible flicker.
+            look = (self.status.walking, self.status.badge,
+                    self.status.badge_tone)
+            if look != self._drawn:
+                self._icon.icon = self._image(*look)
+                self._drawn = look
             self._icon.title = f"Pomodoro Guardian — {self.status.summary}"
             self._icon.update_menu()
         except Exception:  # pragma: no cover - a redraw is never critical
@@ -246,5 +364,5 @@ class TrayIcon:
     # -- icon ---------------------------------------------------------
 
     @staticmethod
-    def _image(walking: bool = False):
-        return render_icon(walking)
+    def _image(walking: bool = False, badge: str = "", tone: str = "work"):
+        return render_icon(walking, badge=badge, tone=tone)

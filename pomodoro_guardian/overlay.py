@@ -401,7 +401,12 @@ class LockOverlay:
             on_key=self._key_pressed,
             on_key_release=self._key_released,
         )
-        self._suppressing = self._suppressor.start()
+        # Wanted *and* permitted. The preference is asked first so a machine
+        # that would refuse the hook is never even asked, which keeps a
+        # deliberate reminder mode free of the OS's permission prompt.
+        self._suppressing = (
+            self._config.block_input and self._suppressor.start()
+        )
         if not self._suppressing:
             self._admit_reminder_only()
 
@@ -616,24 +621,34 @@ class LockOverlay:
             pass
         self._local_hold = None
 
+    def reminder_reason(self) -> str:
+        """Why this break is not enforcing, in the words that fit the cause.
+
+        The two causes need different words. Chosen is a setting she can
+        change; refused is a permission she may not be allowed to grant.
+        Reporting them the same way would send her to the wrong place.
+        """
+        if not self._config.block_input:
+            return "reminder mode — enforcement is switched off in settings"
+        return "reminder only — this system will not let input be blocked"
+
     def _admit_reminder_only(self) -> None:
         """Say on screen that this break is not being enforced.
 
         Silence here would be the dishonest option: an identical-looking
         lock that happens not to block anything teaches her the app is
-        broken rather than that the permission is missing.
+        broken rather than that it is deliberately, or unavoidably, only
+        reminding.
         """
         release = (
             f"hold Esc {self._config.safety_unlock_hold:.0f}s"
             if self._config.safety_unlock
             else "click away"
         )
+        text = f"{self.reminder_reason()}  ·  {release} to dismiss"
         for notice in self._notices:
             try:
-                notice.configure(
-                    text=f"reminder only — input is not blocked  ·  "
-                         f"{release} to dismiss"
-                )
+                notice.configure(text=text)
             except tk.TclError:   # pragma: no cover - window already gone
                 continue
 

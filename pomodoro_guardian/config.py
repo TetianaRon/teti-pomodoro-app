@@ -94,6 +94,28 @@ class Config:
     # silently credited as work time.
     max_tick: float = 30.0
 
+    # --- Enforcement ---
+    # Whether a break actually blocks the keyboard and mouse, or only covers
+    # the screen with a countdown you can click past.
+    #
+    # A *preference*, deliberately separate from whether the machine will
+    # allow blocking at all — that is the OS's answer, discovered by asking
+    # (see platform.py), and a setting claiming to control it would lie about
+    # enforcement, which is the worst thing this app could do. The two are
+    # ANDed: a break enforces only if it is both wanted and permitted.
+    #
+    # Left on, but worth turning off deliberately: to run in reminder mode
+    # while learning to trust the lock, for a day of presentations, or on a
+    # machine that refuses the permission anyway.
+    block_input: bool = True
+
+    # How much genuine input during a break means it was worked through
+    # rather than taken, as a fraction of that break's length. A fraction
+    # rather than a fixed number of seconds so it scales with a long break
+    # and with --demo. 25% of a 5-minute break is over a minute of typing:
+    # well past glancing at a message, comfortably short of working.
+    break_ignored_fraction: float = 0.25
+
     # --- Safety (Phase 1 only; see overlay.py) ---
     # Holding Escape for this long releases the lock. Enforcement is
     # deliberately weakened while the lock is still unproven code — set

@@ -39,6 +39,12 @@ APP_STARTED = "app_started"
 APP_STOPPED = "app_stopped"
 BREAK_TAKEN = "break_taken"
 BREAK_SKIPPED = "break_skipped"
+# A break whose time ran out while she carried on working through it. Only
+# reachable when the lock is not blocking input — but then it is the
+# difference between a log that means something and one that flatters:
+# without it every break reads as taken, which is exactly the sort of
+# optimistic accounting this file exists to catch.
+BREAK_IGNORED = "break_ignored"
 # Why a long break did or did not arrive. Recorded because the count towards
 # it is the one piece of app state with no visible trace of its own: a long
 # break that never fires looks identical to one that was never due.
@@ -67,6 +73,7 @@ class DaySummary:
     walked_seconds: float = 0.0
     breaks_taken: int = 0
     breaks_skipped: int = 0
+    breaks_ignored: int = 0
     skipped_seconds: float = 0.0
     emergency_used: int = 0
     focus_used: int = 0
@@ -83,6 +90,11 @@ class DaySummary:
                 f"{self.breaks_skipped} skipped "
                 f"({self.skipped_seconds / 60:.0f} min)"
             )
+        # Worth its own word rather than folding into "skipped": a skip was
+        # bought from a budget and consciously chosen; this is a break that
+        # was simply worked through.
+        if self.breaks_ignored:
+            parts.append(f"{self.breaks_ignored} worked through")
         if self.emergency_used:
             parts.append(f"{self.emergency_used}x emergency")
         if self.focus_used:
@@ -183,7 +195,7 @@ class History:
             return DaySummary(day)
 
         worked = walked = skipped_seconds = 0.0
-        taken = skipped = emergency = focus = 0
+        taken = skipped = ignored = emergency = focus = 0
         day_type = ""
         for kind, seconds, detail in rows:
             if kind == SNAPSHOT:
@@ -198,6 +210,8 @@ class History:
             elif kind == BREAK_SKIPPED:
                 skipped += 1
                 skipped_seconds += seconds or 0
+            elif kind == BREAK_IGNORED:
+                ignored += 1
             elif kind == WALK_ENDED:
                 walked = max(walked, 0)
             elif kind == EMERGENCY_USED:
@@ -212,6 +226,7 @@ class History:
             walked_seconds=walked,
             breaks_taken=taken,
             breaks_skipped=skipped,
+            breaks_ignored=ignored,
             skipped_seconds=skipped_seconds,
             emergency_used=emergency,
             focus_used=focus,

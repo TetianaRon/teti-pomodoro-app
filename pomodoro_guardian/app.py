@@ -8,6 +8,7 @@ only threaded part, and it only ever writes a timestamp.
 from __future__ import annotations
 
 import argparse
+import math
 import queue
 import sys
 import time
@@ -91,6 +92,15 @@ class Application:
         )
         self._last_snapshot = 0.0
         self._logged_day_type = ""
+        # Captured when a break starts, because the engine clears both the
+        # moment it ends: `_reset_to_idle` sets `_break_is_long` back to
+        # False before BREAK_ENDED is ever handled, which is why every break
+        # in the log up to now recorded itself as "short" — including the
+        # long ones (found 2026-08-10, 17 rows deep).
+        self._break_was_long = False
+        self._break_length = 0.0
+        self._break_input_seconds = 0.0
+        self._last_input_seen = 0.0
         # After the history log exists, so the resume can be recorded there.
         self._resume_position()
         # Resolved once: a missing file should be reported at startup, not
@@ -368,6 +378,39 @@ class Application:
         every = self.config.long_break_every
         return every > 0 and (snapshot.completed_cycles + 1) % every == 0
 
+    def _badge(self, snapshot) -> tuple[str, str]:
+        """The countdown for the tray icon, as (text, tone).
+
+        Answers "have I done 25 minutes yet?" at a glance, which is
+        otherwise genuinely hard to know: work only accrues while you are
+        actually typing, so a wall-clock hour of reading counts for very
+        little and the interval is nothing like 25 minutes long. That was
+        only in the hover tooltip, which means it was only ever read on
+        purpose — and the number matters most when you are absorbed enough
+        not to think of looking.
+
+        Minutes only, rounded up, and never "0": at most two characters fit
+        legibly in a 16px tray slot, and a countdown that sits on 0 for the
+        last minute reads as stuck.
+        """
+        if self._state.focusing:
+            return "", "held"          # no break is coming; nothing to count
+        if snapshot.state is State.BREAK:
+            return self._minutes(snapshot.remaining), "break"
+        if snapshot.state not in (State.WORK, State.WARNING):
+            return "", "work"          # idle: the plain tomato
+        if snapshot.excluded or snapshot.paused:
+            # Frozen by a call, or stopped because you stepped away. Shown
+            # in a different colour rather than hidden: the number is still
+            # true, it just isn't moving.
+            return self._minutes(snapshot.remaining), "held"
+        tone = "long" if self._next_break_is_long(snapshot) else "work"
+        return self._minutes(snapshot.remaining), tone
+
+    @staticmethod
+    def _minutes(seconds: float) -> str:
+        return str(max(1, math.ceil(max(0.0, seconds) / 60)))
+
     def _refresh_tray(self) -> None:
         status = self.tray_status
         snapshot = self.engine.snapshot()
@@ -375,6 +418,7 @@ class Application:
         target = self.settings.walking_target_minutes
 
         status.summary = self._status_line(snapshot)
+        status.badge, status.badge_tone = self._badge(snapshot)
         status.cap_line = self._cap.describe() if self._cap else ""
         status.walk_line = f"walked {walked:.0f} of {target:.0f} min"
         status.walking = self._state.walking
@@ -513,6 +557,39 @@ class Application:
             history_module.CYCLES_RESUMED, seconds=into, detail=detail,
         )
 
+    # -- was the break actually taken? --------------------------------
+
+    def _track_break_input(self, snapshot) -> None:
+        """Count genuine input arriving during a break.
+
+        Only reachable when the lock is not blocking input — but then it is
+        the difference between a history that means something and one that
+        flatters. Without it every break that merely *elapsed* is filed as
+        taken, and the log quietly becomes useless for the one question it
+        is kept to answer.
+
+        Measured from how far the input watermark advanced rather than from
+        the idle window, so a single mouse nudge buys one moment rather
+        than a whole active second. Capped at a tick, or waking the machine
+        would credit the entire time it slept as work through the break.
+        """
+        last = self.monitor.last_input_at
+        if snapshot.state is not State.BREAK:
+            self._last_input_seen = last
+            return
+        if last > self._last_input_seen:
+            self._break_input_seconds += min(
+                TICK_MS / 1000.0, last - self._last_input_seen
+            )
+        self._last_input_seen = last
+
+    def _break_was_ignored(self) -> bool:
+        """Whether enough work happened during the break to call it worked."""
+        if self._break_length <= 0:
+            return False
+        threshold = self.config.break_ignored_fraction * self._break_length
+        return self._break_input_seconds >= threshold
+
     def _track_position(self) -> None:
         """Keep the persisted state in step with the engine's position.
 
@@ -633,6 +710,7 @@ class Application:
         )
         snapshot = self.engine.snapshot()
         self._drain_tray()
+        self._track_break_input(snapshot)
         self._track_position()
         self._record_work(now)
         self._update_focus()
@@ -701,6 +779,11 @@ class Application:
         elif event is Event.BREAK_STARTED:
             kind = "long break" if snapshot.is_long_break else "break"
             self._log(f"{kind} started — locking")
+            # Remembered now because the engine clears both as the break
+            # ends, before BREAK_ENDED is handled.
+            self._break_was_long = snapshot.is_long_break
+            self._break_length = snapshot.remaining
+            self._break_input_seconds = 0.0
             self.banner.hide()
             if not self.dry_run:
                 # remaining == the full break length at the moment it starts,
@@ -711,13 +794,23 @@ class Application:
             # audio. That ordering un-paused a deliberately paused video.
             sounds.play(self._sound_start)
         elif event is Event.BREAK_ENDED:
+            length = "long" if self._break_was_long else "short"
+            worked = self._break_input_seconds
+            ignored = self._break_was_ignored()
             self._log(
                 f"break over (cycle {snapshot.completed_cycles}) — unlocked"
+                + (f" — but worked through {worked / 60:.0f} min of it"
+                   if ignored else "")
             )
             sounds.play(self._sound_end)
+            # The cycle still counts towards the long break either way. The
+            # break did elapse, and withholding the long one on a heuristic
+            # about mouse movement would make enforcement depend on a guess.
             self.history.record(
-                history_module.BREAK_TAKEN,
-                detail="long" if snapshot.is_long_break else "short",
+                history_module.BREAK_IGNORED if ignored
+                else history_module.BREAK_TAKEN,
+                seconds=worked,
+                detail=f"{length}; {worked / 60:.1f} min of input",
             )
             self.overlay.release()
 
@@ -802,6 +895,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable the hold-Escape release (use once you trust the lock)",
     )
     parser.add_argument(
+        "--remind-only",
+        action="store_true",
+        help="cover the screen for breaks without blocking input, for this run",
+    )
+    parser.add_argument(
         "--setup",
         action="store_true",
         help="open the settings window, then exit",
@@ -857,7 +955,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def report_doctor() -> int:
+def report_doctor(path: Path | None = None) -> int:
     """`--doctor`: what this machine can do, and what the app loses if not.
 
     Written to be pasted somewhere useful. On a fully working Windows
@@ -869,7 +967,18 @@ def report_doctor() -> int:
     from . import platform as platform_module
 
     print(f"Pomodoro Guardian — capabilities on {platform_module.platform_name()}")
-    print(f"Python {sys.version.split()[0]}\n")
+    print(f"Python {sys.version.split()[0]}")
+
+    # Whether blocking is *wanted* is a setting; whether it is *possible* is
+    # the OS's answer below. Both are printed, because "no lock" for the two
+    # reasons needs fixing in two completely different places.
+    settings = settings_module.load(path)
+    print(
+        "Break enforcement: "
+        + ("blocking input (settings: on)" if settings.config.block_input
+           else "reminder only (settings: block_input is off)")
+        + "\n"
+    )
 
     missing = []
     for cap, available, detail in platform_module.report():
@@ -991,7 +1100,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.doctor:
-        return report_doctor()
+        return report_doctor(path)
 
     if args.test_sounds:
         settings = settings_module.load(path)
@@ -1063,10 +1172,13 @@ def main(argv: list[str] | None = None) -> int:
     config = settings.config
     if args.demo:
         config = config.scaled(args.demo)
-    if args.no_safety_unlock:
+    if args.no_safety_unlock or args.remind_only:
         from dataclasses import replace
 
-        config = replace(config, safety_unlock=False)
+        if args.no_safety_unlock:
+            config = replace(config, safety_unlock=False)
+        if args.remind_only:
+            config = replace(config, block_input=False)
 
     watcher = CalendarWatcher(
         None if args.no_exclusions else settings.calendar_url,
