@@ -71,6 +71,54 @@ def test_a_wider_message_makes_a_wider_pill():
     assert measure("Break in 1:23", 30) > measure("5 min", 30)
 
 
+# -- padding, measured on the pixels rather than on the intent ----------
+
+
+@pytest.mark.parametrize("text", ["5 min", "25 min", "Break in 0:58"])
+def test_the_type_does_not_touch_the_rounded_cap(text):
+    """The reported defect: the text stuck to the left edge.
+
+    A pill's cap radius is half its height, so at the tomato's own inset a
+    "5" or a "B" ran into the curve — the tomato gets away with it only
+    because it is round and nests. Measured on the rendered ink, since the
+    numbers looked fine right up until it was drawn.
+    """
+    image = render(text, "work", 30)
+    ink_at = _first_ink_column(image)
+    assert ink_at >= 8, f"type starts {ink_at}px from the edge, inside the curve"
+
+
+def test_the_type_does_not_run_into_the_tomato():
+    """"Break in 0:58" reached the fruit when the gap was the plain inset."""
+    layout = pill.Layout("Break in 0:58", 30)
+    assert layout.gap > layout.pad
+    assert layout.text_left + layout.text_width + layout.gap <= layout.icon_left
+
+
+def test_the_width_is_exactly_the_sum_of_its_parts():
+    """measure() and render() reading different insets is how text ends up
+    overflowing the plate, so they share one Layout."""
+    layout = pill.Layout("25 min", 30)
+    assert layout.width == (
+        layout.text_left + layout.text_width + layout.gap
+        + layout.icon + layout.pad
+    )
+    assert render("25 min", "work", 30).width == layout.width
+
+
+def _first_ink_column(image) -> int:
+    """The leftmost column holding a pixel close to the text colour."""
+    from pomodoro_guardian.pill import DEFAULT_TEXT
+
+    pixels = image.load()
+    for x in range(image.width):
+        for y in range(image.height):
+            px = pixels[x, y]
+            if all(abs(px[n] - DEFAULT_TEXT[n]) < 60 for n in range(3)):
+                return x
+    raise AssertionError("no text found in the pill at all")
+
+
 def test_the_pill_matches_the_height_it_was_asked_for():
     for height in (24, 30, 96, 135):
         assert render("5 min", "warn", height).height == height

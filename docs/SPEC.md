@@ -554,6 +554,14 @@ Decisions, each settled by putting it on screen and looking:
 - **Dark amber for the warning.** A bright amber plate was tried first and the
   tomato, being red, vanished into it at the size the warning arrives at. What
   makes the warning noticed is the attention pass, not the loudness of the fill.
+- **The type is inset further than the tomato.** A pill's cap radius is half
+  its height, so at the tomato's own inset a "5" or a "B" ran straight into the
+  curve; the fruit gets away with it because it is round and nests. An optical
+  adjustment rather than a symmetrical one — matching the two numbers is what
+  looked wrong. The gap before the tomato is measured separately again, since a
+  long message ("Break in 0:58") reached the fruit without it. All of it comes
+  from one `Layout`, because a width computed from one set of insets and
+  contents drawn with another is how text ends up overflowing the plate.
 - **Minutes, changing once a minute**, for the countdown. A ticking seconds
   counter was considered and rejected: in the corner of the eye it reads as
   pressure rather than information. The warning does tick seconds, because

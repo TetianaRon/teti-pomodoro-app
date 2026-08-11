@@ -82,21 +82,53 @@ def font_for(pixels: int):
     return None
 
 
+class Layout:
+    """Where everything sits inside a pill of a given height.
+
+    One place, used by both `measure` and `render`, because they have to
+    agree exactly: if the width is computed from one set of insets and the
+    contents drawn with another, the text either overflows the plate or
+    floats away from it.
+    """
+
+    def __init__(self, text: str, height: int) -> None:
+        self.height = height = max(12, int(height))
+        self.font = font_for(height * 0.46)
+        # The tomato's inset. It is a circle, so it nests into the rounded
+        # cap and needs no more room than this.
+        self.pad = max(3, int(height * 0.16))
+        self.icon = max(6, height - self.pad * 2)
+        # The type's inset, deliberately larger. Letters have flat vertical
+        # strokes and the cap's radius is half the pill's height, so at the
+        # tomato's inset a "5" or a "B" ran straight into the curve. An
+        # optical adjustment, not a symmetrical one — matching the numbers
+        # is what looked wrong.
+        self.text_left = max(5, int(height * 0.38))
+        # And its own measure between the type and the tomato. At the plain
+        # inset a long message ("Break in 0:58") ran straight into the fruit.
+        self.gap = max(4, int(height * 0.20))
+        self.text_width = self._measure(text)
+        self.width = (
+            self.text_left + self.text_width + self.gap + self.icon + self.pad
+        )
+
+    def _measure(self, text: str) -> int:
+        from PIL import Image, ImageDraw
+
+        if self.font is None:
+            return int(self.height * 2.0)
+        probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        left, _top, right, _bottom = probe.textbbox((0, 0), text, font=self.font)
+        return right - left
+
+    @property
+    def icon_left(self) -> int:
+        return self.width - self.pad - self.icon
+
+
 def measure(text: str, height: int) -> int:
     """How wide the pill needs to be for `text` at `height`."""
-    from PIL import Image, ImageDraw
-
-    font = font_for(height * 0.46)
-    if font is None:
-        return int(height * 3.2)
-    pad = _padding(height)
-    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    left, _top, right, _bottom = probe.textbbox((0, 0), text, font=font)
-    return int(pad * 3 + (right - left) + (height - pad * 2))
-
-
-def _padding(height: int) -> int:
-    return max(3, int(height * 0.16))
+    return Layout(text, height).width
 
 
 #: Last few pills drawn, keyed on everything that changes their pixels. The
@@ -131,10 +163,11 @@ def _render(text: str, tone: str, height: int, width: int | None = None):
 
     from .tray import render_icon
 
-    height = max(12, int(height))
-    width = int(width or measure(text, height))
-    pad = _padding(height)
-    icon_px = max(6, height - pad * 2)
+    layout = Layout(text, height)
+    height = layout.height
+    width = int(width or layout.width)
+    pad = layout.pad
+    icon_px = layout.icon
     plate = TONES.get(tone, TONES["work"])
     ink = TEXT.get(tone, DEFAULT_TEXT)
 
@@ -156,17 +189,19 @@ def _render(text: str, tone: str, height: int, width: int | None = None):
 
     font = font_for(height * 0.46 * SCALE)
     if font is not None:
-        left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
-        room = (width - pad - icon_px) * SCALE
+        # Left-aligned at the text inset rather than centred in the space
+        # beside the tomato: the pill is sized from this text, so the inset
+        # *is* the padding and centring can only give it away again.
+        left, top, _right, bottom = draw.textbbox((0, 0), text, font=font)
         draw.text(
-            ((room - (right - left)) / 2 - left,
+            (layout.text_left * SCALE - left,
              (box[1] - (bottom - top)) / 2 - top),
             text, font=font, fill=ink + (255,),
         )
 
     flat = image.resize((width, height), Image.LANCZOS)
     icon = render_icon(size=icon_px)
-    flat.paste(icon, (width - pad - icon_px, pad), icon)
+    flat.paste(icon, (layout.icon_left, pad), icon)
     return _key_out(flat)
 
 
