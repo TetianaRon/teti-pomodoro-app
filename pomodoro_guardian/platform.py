@@ -326,8 +326,9 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         key="pill",
         what="The countdown spelled out beside the tray icons",
-        without_it="the number is still on the icon itself, and in the "
-                   "tooltip — this is the legible version of it",
+        without_it="the minutes to the next break are only in the hover "
+                   "tooltip, read on purpose rather than at a glance — which "
+                   "is the one time they are least likely to be read",
         reference="taskbar.py — TaskbarPill",
         on_macos="**Easier here than on Windows.** A menu bar item takes a "
                  "text title directly (rumps: `app.title = '5 min'`), so the "

@@ -31,11 +31,32 @@ import sys
 import tkinter as tk
 
 from .config import DEFAULT, Config
-from .tray import PLATE, render_icon
+from .tray import render_icon
 
-#: Text colour on the pill. The plate colour comes from tray.PLATE, so the
-#: pill and the icon badge cannot drift apart.
+#: Pill colours, by what the countdown means. They live here rather than in
+#: tray.py because the icon carries no number any more: it was drawn there
+#: first, being the only way Windows will show text in the notification
+#: area, and the plate ended up covering two thirds of the tomato to say
+#: something this says better an inch to the left.
+PLATE = {
+    "work": (18, 22, 28),        # minutes until the next break
+    "long": (34, 62, 96),        # ...and the next one is the long break
+    "break": (30, 74, 46),       # minutes left of the break itself
+    "held": (72, 62, 24),        # frozen: a call, or stepped away
+}
 TEXT = (236, 240, 248)
+
+#: Bold faces to try, most platform-native first. A blurry countdown is
+#: worse than none, and Pillow's built-in bitmap font cannot be scaled up
+#: without turning to mush, so there is no fallback below these: without a
+#: real face the pill simply does not appear.
+FONT_CANDIDATES = (
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
 
 #: Sized for this, so the pill never changes width in use. Two digits plus
 #: " min" is the longest a countdown gets.
@@ -158,13 +179,16 @@ class TaskbarPill:
         left, _upper, right, _lower = probe.textbbox((0, 0), WIDEST, font=font)
         return int(pad * 3 + (right - left) + (height - pad * 2))
 
-    def _font(self, height: int):
-        from .tray import _badge_font
+    @staticmethod
+    def _font(height: int):
+        from PIL import ImageFont
 
-        font = _badge_font(max(9, int(height * 0.46)))
-        if font is None:
-            raise RuntimeError("no font for the taskbar pill")
-        return font
+        for candidate in FONT_CANDIDATES:
+            try:
+                return ImageFont.truetype(candidate, max(9, int(height * 0.46)))
+            except OSError:
+                continue
+        raise RuntimeError("no usable bold face for the taskbar pill")
 
     @staticmethod
     def _grab(rect):

@@ -1,22 +1,27 @@
-"""Tests for the countdown drawn onto the tray icon.
+"""Tests for what the countdown says — the number, and what colour it is.
 
-The number answers "have I done 25 minutes yet?", which is otherwise hard
-to know — work only accrues while you are actually typing, so a wall-clock
-hour of reading counts for very little. It used to live only in the hover
-tooltip, which means it was only ever read deliberately, and it matters most
-when you are absorbed enough not to think of looking.
+It answers "have I done 25 minutes yet?", which is otherwise hard to know —
+work only accrues while you are actually typing, so a wall-clock hour of
+reading counts for very little. It used to live only in the hover tooltip,
+which means it was only ever read deliberately, and it matters most when
+you are absorbed enough not to think of looking.
 
-Windows has no way to put text beside a tray icon, so it goes on the icon.
-That leaves 16 pixels, which is what most of these rules are about.
+One function decides it, and `taskbar.py` renders it. It was briefly drawn
+onto the tray icon as well, and that is deliberately gone: two things
+showing the same number is one too many, and the plate needed to make it
+legible covered most of the tomato.
 """
 
 from __future__ import annotations
 
+import pytest
+
 from pomodoro_guardian.app import Application
 from pomodoro_guardian.config import Config
 from pomodoro_guardian.state import AppState
+from pomodoro_guardian.taskbar import PLATE
 from pomodoro_guardian.timer import Snapshot, State
-from pomodoro_guardian.tray import PLATE, TrayIcon, TrayStatus, render_icon
+from pomodoro_guardian.tray import TrayIcon, TrayStatus, render_icon
 
 
 def snap(state, remaining=0.0, cycles=0, paused=False, excluded=False,
@@ -50,10 +55,12 @@ def test_it_never_shows_zero():
     assert app()._badge(snap(State.WORK, remaining=0.4))[0] == "1"
 
 
-def test_a_full_interval_fits_in_two_characters():
-    """Anything wider than two characters is unreadable in a 16px slot."""
+def test_a_full_interval_fits_the_width_the_pill_reserves():
+    """The pill is a fixed width, sized for taskbar.WIDEST, so it must."""
+    from pomodoro_guardian import taskbar
+
     badge, _tone = app()._badge(snap(State.WORK, remaining=25 * 60))
-    assert len(badge) <= 2
+    assert len(f"{badge} min") <= len(taskbar.WIDEST)
 
 
 def test_idle_shows_no_number_at_all():
@@ -106,43 +113,29 @@ def test_every_tone_the_app_can_ask_for_has_a_colour():
     assert asked <= set(PLATE), f"no plate colour for {asked - set(PLATE)}"
 
 
-# -- the drawing itself ------------------------------------------------
+# -- the icon stays a tomato -------------------------------------------
 
 
-def test_an_icon_is_drawn_with_and_without_a_countdown():
-    plain = render_icon(size=64)
-    numbered = render_icon(size=64, badge="12")
+def test_the_icon_carries_no_countdown():
+    """The number belongs to the pill. The icon's job is being recognised.
 
-    assert plain.size == numbered.size == (64, 64)
-    assert plain.tobytes() != numbered.tobytes(), "the badge changed nothing"
-
-
-def test_a_longer_number_is_clipped_rather_than_shrunk_to_nothing():
-    """Two characters is the legible limit; three would be a smear."""
-    assert render_icon(size=64, badge="123").tobytes() == \
-        render_icon(size=64, badge="12").tobytes()
-
-
-def test_the_walking_dot_survives_the_countdown_plate():
-    """It was buried under the plate, and "the images differ" still passed —
-    the plate's rounded corner left a sliver. Count the green instead.
-
-    Deliberately smaller while a countdown runs, since it moves into the
-    strip above the plate. The bar is "still plainly a dot": ~300 pixels of
-    a 64px render is about 5 of the 16 real tray pixels across.
+    Guards against the plate coming back: it took two thirds of the tomato
+    to make two digits legible at 16px, to say what the pill says an inch
+    to the left.
     """
-    walking_only = _green_pixels(render_icon(size=64, walking=True))
-    with_badge = _green_pixels(render_icon(size=64, walking=True, badge="12"))
+    assert render_icon(size=64).tobytes() == render_icon(
+        walking=False, size=64
+    ).tobytes()
+    with pytest.raises(TypeError):
+        render_icon(size=64, badge="12")
 
-    assert walking_only > 100, "the walking dot is not being drawn at all"
-    assert with_badge > 250, (
-        f"the countdown all but hid the walking dot ({with_badge} green "
-        f"pixels, was {walking_only} without it)"
-    )
+
+def test_the_walking_dot_is_still_drawn():
+    assert _green_pixels(render_icon(size=64, walking=True)) > 100
 
 
 def test_no_walking_dot_when_not_walking():
-    assert _green_pixels(render_icon(size=64, badge="12")) < 100
+    assert _green_pixels(render_icon(size=64)) < 100
 
 
 def _green_pixels(image) -> int:
@@ -158,29 +151,12 @@ def _green_pixels(image) -> int:
     )
 
 
-def test_each_tone_draws_differently():
-    drawn = {
-        tone: render_icon(size=64, badge="9", tone=tone).tobytes()
-        for tone in PLATE
-    }
-    assert len(set(drawn.values())) == len(PLATE), "two tones look identical"
-
-
-def test_a_missing_font_leaves_the_plain_tomato(monkeypatch):
-    """Better no number than an unreadable one — see _badge_font."""
-    monkeypatch.setattr("pomodoro_guardian.tray.FONT_CANDIDATES", ())
-
-    assert render_icon(size=64, badge="12").tobytes() == \
-        render_icon(size=64).tobytes()
-
-
 # -- redrawing ---------------------------------------------------------
 
 
 def test_the_icon_is_not_handed_to_windows_when_nothing_changed():
-    """refresh() runs every second; the number changes once a minute."""
+    """refresh() runs every second; the icon changes only around a walk."""
     status = TrayStatus()
-    status.badge = "12"
     tray = TrayIcon(status)
     tray._icon = _FakeIcon()
 
@@ -189,7 +165,7 @@ def test_the_icon_is_not_handed_to_windows_when_nothing_changed():
     tray.refresh()
     assert tray._icon.icon_sets == 1
 
-    status.badge = "11"
+    status.walking = True
     tray.refresh()
     assert tray._icon.icon_sets == 2
 

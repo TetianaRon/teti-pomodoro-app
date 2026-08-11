@@ -476,15 +476,13 @@ captured at `BREAK_STARTED`, where they are still true. Exactly the shape of
 bug §8 exists to catch, and it took writing a second break statistic to
 notice it.
 
-**The countdown is shown in the tray icon itself (added 2026-08-10).** Windows
-offers no way to put text beside a notification-area icon — a 16px image and a
-hover tooltip is the whole interface — so the minutes to the next break are
-drawn onto the icon over a coloured plate, as battery and CPU meters do.
-Minutes only, rounded up, never "0" (a countdown sitting on zero reads as
-stuck), at most two characters, and nothing at all while idle or in Focus Mode
-where a number would be a lie. The plate colour distinguishes an ordinary
-countdown, a long break coming next, the break itself, and a countdown frozen
-by a call.
+**The countdown is shown in the taskbar (added 2026-08-10, moved 2026-08-11).**
+The minutes to the next break appear as "5 min" in a rounded pill beside the
+tray icons. Minutes only, rounded up, never "0" (a countdown sitting on zero
+through its last minute reads as stuck), and nothing at all while idle or in
+Focus Mode where a number would be a lie. The pill's colour distinguishes an
+ordinary countdown, a long break coming next, the break itself, and a
+countdown frozen by a call.
 
 This answers "have I done 25 minutes yet?", which is genuinely hard to know
 otherwise — work accrues only while you are actually typing, so a wall-clock
@@ -493,9 +491,15 @@ minutes long. It previously existed only in the hover tooltip, which means it
 was only ever read deliberately, and the number matters most when you are
 absorbed enough not to think of looking.
 
-**And spelled out in a pill beside the tray icons (added 2026-08-11).** Two
-digits in a 16px slot is the limit of what the icon can carry, so the same
-countdown also appears as "5 min" in a rounded chip in the taskbar.
+**It was first drawn onto the tray icon, and that is deliberately gone.** The
+notification area offers a 16px image and a tooltip and nothing else, so a
+number there has to be painted onto the icon over a plate, as battery meters
+do. It worked — but making two digits legible at that size took two thirds of
+the tomato, and once the pill existed an inch to the left, the icon was
+disfigured to say something already said better. The icon is back to being
+only a tomato, plus its green dot while a walk is running. **Two places
+showing the same number is one too many**, and if they ever disagreed both
+would be worthless.
 
 **It is not actually in the taskbar, because nothing can be.** The
 notification area offers an icon and a tooltip and no way to show text;

@@ -186,6 +186,15 @@ a mistake that already cost this project once.
 taskbar across all four tones. The screenshots also caught the pill correctly
 re-anchoring when a new tray icon appeared and shifted the notification area.
 
+**Then the icon's own countdown came back out.** It had been drawn onto the
+tray icon the day before, that being the only way Windows shows a number in
+the notification area. With the pill an inch to the left, the plate needed to
+make two digits legible was disfiguring the tomato to say something already
+said better — and **two places showing the same number is one too many**,
+since a disagreement between them would make both worthless. The icon is a
+tomato and its walking dot again; `taskbar.py` took over the plate colours and
+the font, and `app._badge` remains the single source both would have used.
+
 **For the Mac:** added as a capability, and it is the one item on that list
 that is *easier* there — a menu bar item takes a text title directly, so the
 whole floating-window trick is unnecessary.

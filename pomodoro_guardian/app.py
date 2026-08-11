@@ -380,7 +380,7 @@ class Application:
         return every > 0 and (snapshot.completed_cycles + 1) % every == 0
 
     def _badge(self, snapshot) -> tuple[str, str]:
-        """The countdown for the tray icon, as (text, tone).
+        """The countdown for the taskbar pill, as (minutes, tone).
 
         Answers "have I done 25 minutes yet?" at a glance, which is
         otherwise genuinely hard to know: work only accrues while you are
@@ -390,9 +390,8 @@ class Application:
         purpose — and the number matters most when you are absorbed enough
         not to think of looking.
 
-        Minutes only, rounded up, and never "0": at most two characters fit
-        legibly in a 16px tray slot, and a countdown that sits on 0 for the
-        last minute reads as stuck.
+        Minutes only, rounded up, and never "0": a countdown sitting on
+        zero through its last minute reads as stuck.
         """
         if self._state.focusing:
             return "", "held"          # no break is coming; nothing to count
@@ -431,7 +430,6 @@ class Application:
         target = self.settings.walking_target_minutes
 
         status.summary = self._status_line(snapshot)
-        status.badge, status.badge_tone = self._badge(snapshot)
         status.cap_line = self._cap.describe() if self._cap else ""
         status.walk_line = f"walked {walked:.0f} of {target:.0f} min"
         status.walking = self._state.walking
