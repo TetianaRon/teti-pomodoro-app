@@ -156,6 +156,49 @@ log), `pomodoro.log` (text log, written when there is no console).
 
 ## Session Worklog
 
+### 2026-08-11 — why the pill kept disappearing
+
+Reported as "it disappears sometimes", which turned out to be **three
+independent bugs** wearing one symptom. Worth recording because each was
+invisible to the tests that existed, and one of those tests was actively
+misleading.
+
+**Shell windows are not full-screen apps.** The hide-when-covered check only
+compared rectangles, and two things on every ordinary desktop satisfy it: the
+desktop itself (`Progman`, measured at −1920, 0, 3840, 1200 across both
+monitors) and `Windows Input Experience` (`Windows.UI.Core.CoreWindow`, at
+exactly 0, 0, 1920, 1080). So **clicking the desktop, pressing Win+D, or
+switching keyboard language hid the pill.** Excluded by window class now.
+
+My hypothesis going in was that *maximised* windows were the culprit, and
+measuring said no: Windows inflates a maximised window's rect by the invisible
+resize border to (−8, −8, 1928, 1040), which stops short of the taskbar strip.
+The existing test had asserted this with an invented (0, 0, 1920, 1032) — right
+answer, wrong reason, and it would have kept passing through the real bug. It
+now uses the measured rect.
+
+**The z-order was taken once and never retaken.** The pill only redrew when the
+number changed — once a minute — while the shell raises its own windows every
+time the taskbar is clicked or Start is opened. So it sat behind the taskbar for
+minutes at a time. Now reasserted every tick with `SetWindowPos` and
+`SWP_NOACTIVATE`, not `lift()`, since a taskbar chip stealing focus once a
+second would be intolerable.
+
+**A single failure was permanent.** `_broken` latched on any exception, and
+locking the workstation is exactly such an exception — a screen grab of a
+locked session comes back black or fails. So one Win+L could cost the pill for
+the rest of the day. Now a 20-second backoff, and a suspiciously flat grab is
+refused rather than cached, since caching black would bake a black rectangle
+into the taskbar.
+
+**The lesson worth keeping:** "it disappears sometimes" is a symptom, not a
+bug. Three causes, and stopping at the first plausible one — or at my confident
+maximised-window hypothesis — would have left two live.
+
+**Verified:** 378 tests (11 new, including the real measured rects for every
+offending window class), pyflakes clean, both offenders re-run against the
+shipped function on this desktop, and the pill re-photographed in the taskbar.
+
 ### Session close — 2026-08-11 (the taskbar countdown pill)
 
 Asked for the countdown "directly in the toolbar next to the app icon", with

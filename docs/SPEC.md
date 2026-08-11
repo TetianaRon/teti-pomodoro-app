@@ -530,10 +530,35 @@ Three decisions, each made by putting it on screen and looking:
   rather than information.
 
 Shown only while something is counting down, and hidden when a window covers
-the screen so it cannot float over a video. That last check compares
-rectangles rather than asking `SHQueryUserNotificationState`, which reports
-busy for *any* full-screen window — this app's own lock included, a mistake
-that already cost this project once (§3).
+the screen so it cannot float over a video, or when an auto-hiding taskbar has
+slid away. The full-screen check compares rectangles rather than asking
+`SHQueryUserNotificationState`, which reports busy for *any* full-screen
+window — this app's own lock included, a mistake that already cost this
+project once (§3).
+
+**A rectangle alone was not enough, and the pill disappeared for it.** Three
+separate causes, all found from one report of "it vanishes sometimes":
+
+- **Shell surfaces report screen-filling bounds.** The desktop (`Progman`,
+  measured at −1920, 0, 3840, 1200 across two monitors) and the input
+  experience host (`Windows.UI.Core.CoreWindow`, at exactly 0, 0, 1920, 1080)
+  both satisfied the test, so clicking the desktop, pressing Win+D or
+  switching language took the pill away. They are excluded by window class
+  now. An ordinary *maximised* window never reached this: Windows inflates its
+  rect by the invisible resize border to (−8, −8, 1928, 1040), which stops
+  short of the taskbar strip.
+- **The z-order was taken once and never retaken.** The shell puts its own
+  windows above ours whenever the taskbar is clicked or Start is opened, and
+  the pill only redrew when the number changed — once a minute — so it spent
+  whole minutes behind the taskbar. It now reasserts topmost every tick, via
+  `SetWindowPos` with `SWP_NOACTIVATE` rather than tkinter's `lift()`, because
+  a chip in the taskbar stealing focus once a second would be intolerable.
+- **A single failure was permanent.** Any exception latched a `_broken` flag
+  for the life of the process, and locking the workstation is exactly such a
+  failure: a screen grab of a locked session comes back black or fails
+  outright. Failures now back off for 20 seconds and retry, and a
+  suspiciously flat backdrop grab is refused rather than cached — otherwise a
+  black rectangle would be baked into the taskbar for the rest of the day.
 
 On macOS this is all unnecessary: a menu bar item takes a text title
 directly, so the number sits beside the icon natively.

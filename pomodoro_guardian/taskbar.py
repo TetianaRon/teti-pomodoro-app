@@ -28,6 +28,7 @@ convenience, and the tray icon still carries the same number.
 from __future__ import annotations
 
 import sys
+import time
 import tkinter as tk
 
 from .config import DEFAULT, Config
@@ -89,20 +90,56 @@ def taskbar_rects():
         return None, None
 
 
+#: Shell surfaces that report screen-filling bounds without being anything
+#: the pill should get out of the way of. Every one of these was measured
+#: firing the full-screen test on a perfectly ordinary desktop:
+#:
+#: * `Progman` / `WorkerW` — the desktop itself, spanning every monitor
+#:   (-1920, 0, 3840, 1200 here). Clicking the desktop or pressing Win+D
+#:   made it the foreground window and the pill vanished.
+#: * `Windows.UI.Core.CoreWindow` — hosts "Windows Input Experience", the
+#:   IME, emoji picker and touch keyboard, sitting at exactly (0, 0, 1920,
+#:   1080). Win+Space or Win+. brought it forward and took the pill with it.
+#: * The taskbars, which are the thing the pill lives in.
+#: * Task View and the Alt+Tab surface, for the same reason.
+#:
+#: Excluding CoreWindow does mean a full-screen UWP app will not hide the
+#: pill. That is the right way round: floating over a rare full-screen store
+#: app is a far smaller harm than disappearing every time the language is
+#: switched.
+SHELL_CLASSES = frozenset({
+    "Progman",
+    "WorkerW",
+    "Shell_TrayWnd",
+    "Shell_SecondaryTrayWnd",
+    "Windows.UI.Core.CoreWindow",
+    "XamlExplorerHostIslandWindow",
+    "MultitaskingViewFrame",
+    "ForegroundStaging",
+})
+
+
 def covered_by_fullscreen(bar) -> bool:
-    """Whether something is filling the screen the taskbar is on.
+    """Whether a real window is filling the screen the taskbar is on.
 
     A topmost pill would otherwise float over a full-screen video or a
     presentation. Measured by rectangle rather than by asking Windows for a
     notification state: `SHQueryUserNotificationState` reports QUNS_BUSY for
     any full-screen window, this app's own lock included, and that mistake
     already cost this project once (docs/SPEC.md §3).
+
+    A rectangle alone is not enough, though — see `SHELL_CLASSES`. Note that
+    an ordinary *maximised* window does not reach here: Windows inflates its
+    rect by the invisible resize border, giving (-8, -8, 1928, 1040) on a
+    1080p screen, which stops short of the taskbar strip.
     """
     try:
         import win32gui
 
         hwnd = win32gui.GetForegroundWindow()
-        if not hwnd or hwnd == win32gui.FindWindow("Shell_TrayWnd", None):
+        if not hwnd:
+            return False
+        if win32gui.GetClassName(hwnd) in SHELL_CLASSES:
             return False
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     except Exception:       # pragma: no cover
@@ -112,8 +149,37 @@ def covered_by_fullscreen(bar) -> bool:
     return left <= 0 and top <= 0 and right >= bar[2] and bottom >= bar[3]
 
 
+def taskbar_hidden(bar) -> bool:
+    """Whether the taskbar has slid off screen, as auto-hide leaves it.
+
+    An auto-hiding taskbar keeps its window visible and simply parks it
+    beyond the screen edge, leaving a couple of pixels behind. A pill still
+    drawn at its old place would then be a chip floating over the work,
+    which is not what it is for.
+    """
+    try:
+        import win32api
+        import win32con
+        import win32gui
+
+        tray = win32gui.FindWindow("Shell_TrayWnd", None)
+        monitor = win32api.MonitorFromWindow(
+            tray, win32con.MONITOR_DEFAULTTOPRIMARY
+        )
+        screen = win32api.GetMonitorInfo(monitor)["Monitor"]
+    except Exception:       # pragma: no cover
+        return False
+    on_screen = min(bar[3], screen[3]) - max(bar[1], screen[1])
+    return on_screen < (bar[3] - bar[1]) * 0.5
+
+
 class TaskbarPill:
     """A fixed-width countdown chip, parked beside the notification area."""
+
+    #: How long to wait after a failure before trying again. Long enough not
+    #: to hammer a shell that is busy or absent, short enough that unlocking
+    #: the machine brings the pill back without waiting for a break.
+    RETRY_SECONDS = 20.0
 
     def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
         self._root = root
@@ -124,7 +190,12 @@ class TaskbarPill:
         self._rect: tuple | None = None
         self._drawn: tuple | None = None
         self._backdrop = None
-        self._broken = False        # a failure here is never retried in a loop
+        # Failures back off rather than latching. The first version set a
+        # `_broken` flag for good on any exception, which meant a single
+        # transient miss cost the pill for the rest of the day — and locking
+        # the workstation is exactly such a miss, since a screen grab of a
+        # locked session comes back black or fails outright.
+        self._retry_at = 0.0
 
     @property
     def visible(self) -> bool:
@@ -132,20 +203,22 @@ class TaskbarPill:
 
     def update(self, text: str, tone: str = "work") -> None:
         """Show the pill with this countdown, moving or redrawing as needed."""
-        if self._broken:
-            return
         if not text:
             self.hide()
+            return
+        if time.monotonic() < self._retry_at:
             return
         try:
             self._update(text, tone)
         except Exception:   # pragma: no cover - a chip must not break a break
-            self._broken = True
+            # Backed off, not given up: whatever went wrong is usually the
+            # session being locked, and it will be over.
+            self._retry_at = time.monotonic() + self.RETRY_SECONDS
             self.hide()
 
     def _update(self, text: str, tone: str) -> None:
         bar, notify = taskbar_rects()
-        if bar is None or covered_by_fullscreen(bar):
+        if bar is None or taskbar_hidden(bar) or covered_by_fullscreen(bar):
             self.hide()
             return
 
@@ -162,6 +235,34 @@ class TaskbarPill:
         if (text, tone) != self._drawn:
             self._draw(text, tone)
             self._drawn = (text, tone)
+
+        # Every tick, not only on a redraw. The countdown changes once a
+        # minute, and the shell puts its own windows above ours far more
+        # often than that — clicking the taskbar or opening Start is enough.
+        # Without this the pill spent whole minutes behind the taskbar,
+        # which is the other half of "it disappears sometimes".
+        self._raise()
+
+    def _raise(self) -> None:
+        """Retake the top of the z-order without taking focus."""
+        if self._window is None:
+            return
+        try:
+            import win32con
+            import win32gui
+
+            hwnd = (win32gui.GetParent(self._window.winfo_id())
+                    or self._window.winfo_id())
+            # SetWindowPos rather than tkinter's lift(): this is the call
+            # that cannot activate the window, and a chip in the taskbar
+            # stealing focus once a second would be intolerable.
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                | win32con.SWP_NOACTIVATE,
+            )
+        except ImportError:     # pragma: no cover - not Windows
+            pass
 
     def _geometry(self, bar, notify) -> tuple:
         height = max(18, int((bar[3] - bar[1]) * 0.62))
@@ -192,12 +293,22 @@ class TaskbarPill:
 
     @staticmethod
     def _grab(rect):
+        """Photograph what is behind the pill, or refuse to.
+
+        A grab taken while the workstation is locked comes back uniformly
+        black. Caching that would bake a black rectangle into the taskbar
+        for the rest of the session, so a suspiciously flat capture is
+        rejected and the caller backs off and tries again later.
+        """
         from PIL import ImageGrab
 
         x, y, width, height = rect
-        return ImageGrab.grab(
+        shot = ImageGrab.grab(
             bbox=(x, y, x + width, y + height), all_screens=True
         ).convert("RGBA")
+        if len(shot.getcolors(maxcolors=2) or ()) == 1:
+            raise RuntimeError("backdrop grab came back flat — session locked?")
+        return shot
 
     def _draw(self, text: str, tone: str) -> None:
         from PIL import Image, ImageDraw, ImageTk
