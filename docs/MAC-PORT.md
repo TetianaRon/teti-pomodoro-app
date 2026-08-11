@@ -42,8 +42,9 @@ The app has two halves.
 **The brain — works on a Mac already, unchanged.** Detecting that you're
 working, the 25/5 rhythm, the long break every 4th cycle, the daily work cap,
 the walking tally, the calendar meeting skip, the history log, the settings
-window. Roughly 3,000 lines and **all 308 automated tests**. Nothing here
-needs porting.
+window — plus reminder mode, and the record of which breaks were actually
+taken rather than worked through. Roughly 3,000 lines and **all 367
+automated tests**. Nothing here needs porting.
 
 **The hands — these touch the operating system.** Blocking input, covering
 every screen, the menu bar icon, playing chimes, detecting the camera and
@@ -97,7 +98,7 @@ automatically — that's expected, not an error.
 .venv/bin/python -m pytest tests
 ```
 
-**You should see 308 passing.** This is the moment worth having early: it
+**You should see 367 passing.** This is the moment worth having early: it
 means every rule about breaks, caps, walking and history is intact on your
 machine, and anything that goes wrong from here is in the OS-facing parts
 only.
@@ -177,19 +178,28 @@ Two parts, and they're independent:
    **System Settings → Privacy & Security → Accessibility** (and check
    **Input Monitoring** too).
 
-**The app already handles being refused.** If it can't block input, the break
-screen still appears on every monitor with its countdown, says *"reminder
-only — input is not blocked"*, and lets you dismiss it or click away. That is
-a deliberate mode, not a broken one.
+**Do part 1 first and stop there for a while.** Add `--remind-only` and you
+have the whole break screen with no permission involved and nothing that can
+take your keyboard — a full-screen countdown you can click past. That is a
+genuinely useful app, it is the safest possible way to test the screen
+covering, and it means part 2 becomes a decision rather than a prerequisite.
+
+**The app already handles being refused, too.** If blocking is wanted but the
+system won't allow it, the break screen still appears on every monitor and
+says so — and it distinguishes *"enforcement is switched off in settings"*
+from *"this system will not let input be blocked"*, so you always know which
+you are looking at. Either way you can dismiss it or click away.
 
 Test with short intervals so you're never waiting 25 minutes:
 
 ```sh
-.venv/bin/python -m pomodoro_guardian --demo 60
+.venv/bin/python -m pomodoro_guardian --demo 60 --remind-only
 ```
 
 That turns 25 minutes of work into 25 seconds and a 5-minute break into 5
-seconds. Watch a full cycle, then four in a row to see the long break.
+seconds. Watch a full cycle, then four in a row to see the long break. Drop
+`--remind-only` only once you have watched it behave and are ready to let it
+hold the keyboard.
 
 ### Stage 4 — The menu bar, and calls
 
@@ -199,6 +209,15 @@ the *main* thread, and the window code already owns it — two libraries, one
 main thread. Options: `rumps` instead, or a different way to reach the
 controls. Until it's solved you have no menu, which means **no way to start a
 walk and no way to quit except Ctrl+C** in the Terminal you started it from.
+
+**Solving it also hands you the countdown for free**, which is the one thing
+on this list that is *easier* on a Mac. Windows cannot put text beside a tray
+icon at all, so `taskbar.py` goes to considerable lengths — a floating
+click-through window parked next to the notification area, composited over a
+photograph of the taskbar behind it — to show "5 min" there. A macOS menu bar
+item just takes a text title (`rumps`: `app.title = "5 min"`). Ignore
+`taskbar.py` entirely; the number it computes comes from `app._badge`, which
+is portable.
 
 **Camera and microphone detection** — so a break never lands in the middle of
 a call — has no macOS equivalent to what Windows uses, and is genuine
@@ -219,10 +238,14 @@ That turns the mechanism off honestly rather than half-working.
 The lock blocks your keyboard and mouse. On a work machine, on a working day,
 that deserves respect.
 
-1. **Leave the escape hatch on.** Holding **Escape for 3 seconds** releases
+1. **Start in reminder mode and stay there until you want the lock.**
+   `--remind-only` gives you every break, on every screen, with nothing able
+   to touch your keyboard. There is no rush to enable blocking on a work
+   machine, and nothing you learn from it is lost when you do.
+2. **Leave the escape hatch on.** Holding **Escape for 3 seconds** releases
    any break. It's on by default. **Never pass `--no-safety-unlock`** while
    this is new code on your machine.
-2. **Know how to kill it before you need to.** From a second Terminal window:
+3. **Know how to kill it before you need to.** From a second Terminal window:
    ```sh
    pkill -f pomodoro_guardian
    ```
@@ -230,10 +253,10 @@ that deserves respect.
    releases input suppression if a lock ever outlives its break by 60
    seconds, and it's deliberately independent of the rest of the app, so it
    survives the app freezing.
-3. **Test with `--demo 60`, never with real 25-minute intervals.** A bug in a
+4. **Test with `--demo 60`, never with real 25-minute intervals.** A bug in a
    5-second break costs you 5 seconds.
-4. **Don't test the lock right before a meeting.** Obvious, easy to forget.
-5. **If Claude isn't sure whether something is safe, stop and ask.** You are
+5. **Don't test the lock right before a meeting.** Obvious, easy to forget.
+6. **If Claude isn't sure whether something is safe, stop and ask.** You are
    approving code you can't read. That's fine for a chime; it is not fine for
    code that takes over your keyboard. "I'm not certain" is a reason to wait.
 
@@ -255,12 +278,30 @@ For overfocus, an unmissable full-screen reminder plus honest data about your
 own patterns is a real intervention. It is not the same as a lock, and the
 app will say so on screen rather than pretending.
 
-**One thing worth building if you land here:** in this mode the history would
-record every break as "taken" even if you worked straight through it, which
-would quietly make your data useless. Since idle time is available without
-permission, the app can watch whether you actually stopped and record
-`break_taken` versus `break_ignored`. That turns the weakness into the most
-useful thing it could tell you.
+**You don't have to wait for IT's answer to use this.** Reminder mode is a
+setting, not just what happens when permission is refused. Turn it on in the
+settings window ("Block the keyboard and mouse during a break"), or for a
+single run:
+
+```sh
+.venv/bin/python -m pomodoro_guardian --remind-only
+```
+
+That is a good way to start regardless of what IT says — the same way the
+3-second Escape release was kept on here while the lock was still new code.
+Live with the reminders for a week, then decide whether you want the lock.
+The break screen names which of the two it is, so you are never left guessing
+whether enforcement is off because you chose it or because the system refused
+it.
+
+**The honesty problem this creates is already solved.** A break you can walk
+away from is a break you can work straight through, and recording those as
+"taken" would quietly make your history useless. The app counts real input
+during a break — idle time needs no permission, so this works in reminder
+mode — and past a quarter of that break's length records it as
+`break_ignored`, reported by `--history` as "worked through". For overfocus
+that may be the single most useful number the app produces, and you get it
+whether or not the lock ever works.
 
 ---
 

@@ -38,11 +38,17 @@ own machine, with her own Claude account — she is not a developer, and there i
 no Mac here to test on. **`docs/MAC-PORT.md` is the whole handover**; read it
 before touching anything platform-specific.
 
-What that changed on this side: `platform.py` names all 13 platform
+What that changed on this side: `platform.py` names all 14 platform
 capabilities and `--doctor` reports them; `activity.py` gained an idle-time
 seam whose macOS half needs no permission; and the lock's degraded mode is
 now safe rather than a trap. **The app is expected to run with pieces
 missing** — that is deliberate, and `--doctor` is what keeps it honest.
+
+**Keep `docs/MAC-PORT.md` current with the Windows app.** It went stale
+within a day: it told her to build the `break_ignored` accounting that had
+just been built, and quoted a test count two features out of date. Anything
+that changes what she would do — a new run flag, a capability, a feature that
+removes one of her tasks — belongs there in the same sitting.
 
 ### The work now is feedback-driven, not phase-driven
 Every phase is built. What changes the app from here is **using it and
