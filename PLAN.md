@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 339 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 356 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 339 tests
+.venv\Scripts\python.exe -m pytest tests                 # 356 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -149,6 +149,46 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### Session close — 2026-08-11 (the taskbar countdown pill)
+
+Asked for the countdown "directly in the toolbar next to the app icon", with
+a mockup. **Windows cannot do that**: the notification area takes an icon and
+a tooltip, deskbands were deprecated, and Windows 11 removed third-party
+toolbars. What it *can* do is a borderless click-through always-on-top window
+parked immediately left of `TrayNotifyWnd`, which looks identical.
+
+Spiked before promising, because the one thing that could not be reasoned
+about was whether a window can draw above the taskbar — itself topmost. It
+can. The spike also produced the two problems worth recording:
+
+- **Colour-keying the background left a magenta fringe** on the rounded
+  corners: an anti-aliased edge pixel is a blend of pill and key colour and
+  matches neither. Fixed by photographing the taskbar behind the pill and
+  compositing onto that, which gives clean edges for nothing and stays true
+  because the strip it covers is empty taskbar.
+- **A short countdown sat hard left** against the padding, since the pill is
+  a fixed width. Centred in the space beside the tomato instead. Caught by
+  looking at "9 min" next to "25 min", not by any test.
+
+Fixed width is deliberate: a pill that resized once a minute would jitter and
+re-grab its backdrop every time. Minutes rather than a ticking `5:15` was the
+contributor's call — in the corner of the eye a seconds counter reads as
+pressure rather than information. Driven from the same `_badge` function as
+the icon, so the two can never disagree.
+
+Hidden when a window covers the screen, so it cannot float over a video —
+compared by rectangle rather than by asking `SHQueryUserNotificationState`,
+which reports busy for any full-screen window including this app's own lock,
+a mistake that already cost this project once.
+
+**Verified:** 356 tests (17 new), pyflakes clean, and photographed in the real
+taskbar across all four tones. The screenshots also caught the pill correctly
+re-anchoring when a new tray icon appeared and shifted the notification area.
+
+**For the Mac:** added as a capability, and it is the one item on that list
+that is *easier* there — a menu bar item takes a text title directly, so the
+whole floating-window trick is unnecessary.
 
 ### Session close — 2026-08-10 (fourth sitting: reminder mode, honest breaks, tray countdown)
 

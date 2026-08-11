@@ -493,6 +493,47 @@ minutes long. It previously existed only in the hover tooltip, which means it
 was only ever read deliberately, and the number matters most when you are
 absorbed enough not to think of looking.
 
+**And spelled out in a pill beside the tray icons (added 2026-08-11).** Two
+digits in a 16px slot is the limit of what the icon can carry, so the same
+countdown also appears as "5 min" in a rounded chip in the taskbar.
+
+**It is not actually in the taskbar, because nothing can be.** The
+notification area offers an icon and a tooltip and no way to show text;
+deskbands, the mechanism that once let a program put a control in the taskbar,
+were deprecated years ago and Windows 11 dropped third-party toolbars
+entirely. The pill is a borderless, click-through, always-on-top window
+positioned immediately left of `TrayNotifyWnd` — visually part of the taskbar,
+architecturally a window floating over it. Windows 11 no longer exposes the
+individual icon windows, so it anchors to the notification area as a whole;
+if this app's icon is in the overflow, the pill sits by the chevron rather
+than by the tomato.
+
+Three decisions, each made by putting it on screen and looking:
+
+- **It composites over a photograph of the taskbar behind it.** Colour-keying
+  a transparent background was tried first and left a magenta fringe on the
+  rounded corners, because an anti-aliased edge pixel is a blend of pill and
+  key colour and matches neither. Grabbing the backdrop and blending onto it
+  gives clean edges for nothing, and the strip it covers is empty taskbar, so
+  the photograph stays true.
+- **Fixed width**, sized for the longest countdown, or it would jitter
+  sideways once a minute and re-grab its backdrop each time. The text is
+  centred in the space left of the tomato, since a short countdown otherwise
+  sat hard against the left edge.
+- **Minutes, changing once a minute**, matching the icon and driven from the
+  same function so the two can never disagree. A ticking seconds counter was
+  considered and rejected: in the corner of the eye it reads as pressure
+  rather than information.
+
+Shown only while something is counting down, and hidden when a window covers
+the screen so it cannot float over a video. That last check compares
+rectangles rather than asking `SHQueryUserNotificationState`, which reports
+busy for *any* full-screen window — this app's own lock included, a mistake
+that already cost this project once (§3).
+
+On macOS this is all unnecessary: a menu bar item takes a text title
+directly, so the number sits beside the icon natively.
+
 ## 9. Proposed tech stack
 
 **Python**, packaged as a standalone Windows `.exe` (PyInstaller). Rationale: best fit for the mix of system-level needs here — global input activity monitoring, a genuine full-screen input-blocking overlay, and Google Calendar API access all have mature, well-supported Python libraries, and iteration speed matters since this spec will likely evolve after real use.

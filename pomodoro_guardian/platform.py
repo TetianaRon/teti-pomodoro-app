@@ -114,6 +114,18 @@ def _probe_monitors() -> tuple[bool, str]:
     return True, f"{count} monitor(s) enumerated"
 
 
+def _probe_pill() -> tuple[bool, str]:
+    from .taskbar import taskbar_rects
+
+    bar, notify = taskbar_rects()
+    if bar is None:
+        return False, "no taskbar found to sit in"
+    if notify is None:
+        return True, f"taskbar {bar[2] - bar[0]}x{bar[3] - bar[1]}, "\
+                     f"no notification area — will sit at the far edge"
+    return True, f"notification area starts at x={notify[0]}"
+
+
 def _probe_click_through() -> tuple[bool, str]:
     try:
         import win32gui
@@ -217,6 +229,7 @@ _PROBES = {
     "idle": _probe_idle,
     "event_tap": _probe_event_tap,
     "monitors": _probe_monitors,
+    "pill": _probe_pill,
     "click_through": _probe_click_through,
     "cursor": _probe_cursor,
     "audio_check": _probe_audio_check,
@@ -309,6 +322,18 @@ CAPABILITIES: tuple[Capability, ...] = (
                  "already owns it. A real design decision: `rumps` on the "
                  "main thread, or a different control surface. Not a "
                  "translation of the existing call.",
+    ),
+    Capability(
+        key="pill",
+        what="The countdown spelled out beside the tray icons",
+        without_it="the number is still on the icon itself, and in the "
+                   "tooltip — this is the legible version of it",
+        reference="taskbar.py — TaskbarPill",
+        on_macos="**Easier here than on Windows.** A menu bar item takes a "
+                 "text title directly (rumps: `app.title = '5 min'`), so the "
+                 "whole floating-window trick is unnecessary — the number "
+                 "goes next to the icon natively. Depends on solving the "
+                 "menu bar first.",
     ),
     Capability(
         key="click_through",

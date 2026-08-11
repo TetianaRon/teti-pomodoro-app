@@ -32,7 +32,7 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import runtime, sounds, summary, tray, walking
+from . import runtime, sounds, summary, taskbar, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
 from .timer import Event, PomodoroEngine, Position, State
 
@@ -127,6 +127,7 @@ class Application:
             on_stop_walk=self._stop_walk,
         )
         self.banner = WarningBanner(self._root, config)
+        self.pill = taskbar.TaskbarPill(self._root, config)
         self.tray_status = tray.TrayStatus()
         self.tray = tray.TrayIcon(self.tray_status)
         self.summary_window = summary.SummaryWindow(self._root)
@@ -411,6 +412,18 @@ class Application:
     def _minutes(seconds: float) -> str:
         return str(max(1, math.ceil(max(0.0, seconds) / 60)))
 
+    def _update_pill(self, snapshot) -> None:
+        """The same countdown, spelled out beside the tray icons.
+
+        Driven from `_badge` rather than from its own reading of the state,
+        so the pill and the icon can never disagree about how long is left
+        — two places showing different numbers would undermine both.
+        """
+        if self.dry_run:
+            return
+        badge, tone = self._badge(snapshot)
+        self.pill.update(f"{badge} min" if badge else "", tone)
+
     def _refresh_tray(self) -> None:
         status = self.tray_status
         snapshot = self.engine.snapshot()
@@ -686,6 +699,7 @@ class Application:
         # suppression, so it goes first no matter how we got here.
         self.overlay.release()
         self.banner.hide()
+        self.pill.hide()
         self.walk_prompt.hide()
         self.summary_window.hide()
         self.tray.stop()
@@ -717,6 +731,7 @@ class Application:
         self._update_walking()
         self._update_cap()
         self._refresh_tray()
+        self._update_pill(snapshot)
         self.summary_window.refresh(
             self.history, self._cap, self._state, self.settings
         )
