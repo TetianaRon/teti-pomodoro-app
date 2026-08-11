@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from pomodoro_guardian.app import Application
+from pomodoro_guardian.app import Application, _short, ceil_minutes
 from pomodoro_guardian.config import Config
 from pomodoro_guardian.state import AppState
 from pomodoro_guardian.taskbar import PLATE
@@ -111,6 +111,55 @@ def test_every_tone_the_app_can_ask_for_has_a_colour():
         )
     }
     assert asked <= set(PLATE), f"no plate colour for {asked - set(PLATE)}"
+
+
+# -- the pill and its tooltip must never contradict each other ---------
+
+
+@pytest.mark.parametrize("remaining", [
+    1499, 300, 121, 120, 119, 118, 90, 61, 60,
+])
+def test_the_pill_and_the_tooltip_agree_to_the_minute(remaining):
+    """The reported bug: pill "2 min", tooltip "1 min", same instant.
+
+    They are read together — the tooltip is what hovering the pill gives
+    you — so a disagreement discredits both. It came from two roundings:
+    the status line floored while the pill rounded up, which put them out
+    of step for all but the exact multiples of 60.
+    """
+    instance = app()
+    snapshot = snap(State.WORK, remaining=remaining)
+
+    pill, _tone = instance._badge(snapshot)
+    tooltip = instance._status_line(snapshot)
+
+    assert f"{pill} min" in tooltip, (
+        f"pill says {pill} min, tooltip says {tooltip!r}"
+    )
+
+
+@pytest.mark.parametrize("remaining", [59, 45, 1])
+def test_under_a_minute_the_tooltip_is_more_precise_not_contradictory(remaining):
+    """Seconds in the tooltip against "1 min" on the pill is finer detail,
+    not a different answer — the pill deals only in minutes."""
+    instance = app()
+    snapshot = snap(State.WORK, remaining=remaining)
+
+    assert instance._badge(snapshot)[0] == "1"
+    assert "sec" in instance._status_line(snapshot)
+
+
+def test_a_part_minute_is_never_rounded_away():
+    """Reaching "0 min" and then running on for another 59s reads as stuck."""
+    assert ceil_minutes(0.4) == 1
+    assert ceil_minutes(61) == 2
+    assert ceil_minutes(120) == 2
+
+
+def test_hours_are_built_from_the_same_rounding():
+    assert _short(3600) == "1h 00m"
+    assert _short(3601) == "1h 01m"
+    assert _short(4200) == "1h 10m"
 
 
 # -- the icon stays a tomato -------------------------------------------

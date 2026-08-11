@@ -409,7 +409,9 @@ class Application:
 
     @staticmethod
     def _minutes(seconds: float) -> str:
-        return str(max(1, math.ceil(max(0.0, seconds) / 60)))
+        """The pill's number. Shares `ceil_minutes` with the tooltip, which
+        is the only thing stopping the two disagreeing again."""
+        return str(ceil_minutes(seconds))
 
     def _update_pill(self, snapshot) -> None:
         """The same countdown, spelled out beside the tray icons.
@@ -1072,15 +1074,37 @@ def report_exclusions(
     return 0
 
 
+def ceil_minutes(seconds: float) -> int:
+    """Whole minutes remaining, never rounding a part-minute away.
+
+    The single rounding for every countdown the app shows. It exists
+    because there were briefly two: this line's tooltip floored while the
+    taskbar pill rounded up, so at 1:59 left the pill read "2 min" and its
+    own tooltip read "1 min" — and they are read side by side, the tooltip
+    being what you get by hovering the pill. Disagreeing about the same
+    number in the same instant discredits both.
+
+    Rounding up rather than down because a countdown that reaches "0 min"
+    and then keeps going for another 59 seconds reads as stuck.
+    """
+    return max(1, math.ceil(max(0.0, seconds) / 60))
+
+
 def _short(seconds: float) -> str:
-    """A duration a glance can read: "12 min", "45 sec", "1h 20m"."""
+    """A duration a glance can read: "12 min", "45 sec", "1h 20m".
+
+    Under a minute it switches to seconds, which is more precise than the
+    pill rather than in conflict with it: the pill says "1 min" for that
+    last stretch because it deals only in minutes.
+    """
     seconds = max(0.0, seconds)
-    if seconds >= 3600:
-        hours, rest = divmod(int(seconds), 3600)
-        return f"{hours}h {rest // 60:02d}m"
-    if seconds >= 60:
-        return f"{int(seconds) // 60} min"
-    return f"{int(seconds)} sec"
+    if seconds < 60:
+        return f"{int(seconds)} sec"
+    minutes = ceil_minutes(seconds)
+    if minutes >= 60:
+        hours, rest = divmod(minutes, 60)
+        return f"{hours}h {rest:02d}m"
+    return f"{minutes} min"
 
 
 def _or_none(names: list[str]) -> str:
