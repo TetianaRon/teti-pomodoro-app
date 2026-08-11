@@ -96,6 +96,38 @@ courtesy.
 
 The lock blocks keyboard and mouse but deliberately **not Ctrl+Alt+Del** — blocking the Secure Attention Sequence needs a kernel driver. It stays as the last-resort exit, alongside closing the app (SPEC §5's intentional escape hatch). A `safety_unlock` setting additionally releases the lock on a 3-second Escape hold; it is on by default while the lock is new code and is expected to be turned off once proven.
 
+**Reminder-only mode (added 2026-08-10).** `Config.block_input`, a checkbox in
+settings and `--remind-only` for a single run, decides whether a break blocks
+input or merely covers every screen with a countdown you can click past. On by
+default.
+
+The distinction that shapes it: **whether blocking is *wanted* is a setting;
+whether it is *possible* is the operating system's answer**, discovered by
+asking rather than configured. A checkbox claiming to control the second would
+lie about enforcement, which is the worst failure available to this app — you
+would believe you were held to a break you were not. The two are ANDed, and a
+break enforces only if it is both wanted and permitted. The lock screen names
+the actual cause, because "switched off in settings" and "this system will not
+allow it" send you to entirely different places.
+
+Reminder mode is a real mode, not a broken lock. It exists for three
+situations: learning to trust the lock before letting it take the keyboard, a
+day of presentations, and a machine that refuses the permission outright —
+which is the macOS case, where suppression needs Accessibility permission a
+managed machine may deny (`docs/MAC-PORT.md`).
+
+Two things follow from a break that can be walked away from, both handled:
+
+- **The window must be leaveable.** It is borderless, always-on-top and refuses
+  the window-manager close path, so without care it becomes unmissable *and*
+  inescapable — worse than either. The z-order is therefore not reclaimed while
+  input is unblocked, and each window binds its own key events so every gesture
+  still works without a global hook. Those bindings are installed always: while
+  suppression is live the keystroke never reaches a window, so they are inert,
+  and that self-selection is the only cover for a hook that starts cleanly and
+  then silently receives nothing.
+- **The log must not flatter the day.** See §8.
+
 ## 3. Never-interrupt exclusions
 
 The lock will not trigger — and an in-progress countdown pauses — while:
@@ -407,7 +439,7 @@ There is deliberately no separate "checkpoint time" setting — the reduction is
 
 A simple local log (e.g. SQLite or a JSON/CSV log file), used both to drive the caps above and to give you visibility into your own patterns over time:
 - Work sessions (start/end, duration)
-- Breaks taken / skipped (which path, duration)
+- Breaks taken / skipped (which path, duration) / **worked through**
 - Emergency Mode activations (date, duration) — running weekly total
 - Focus Mode activations (date, duration) — running daily count
 - Day-type overrides (date, direction, and whether the calendar was overruled) — running monthly count of the capped "treat as working day" direction, per §5a. Also the cheapest way to find out whether the ≥6 h rule is misclassifying days in practice: a run of raises would say so.
@@ -415,6 +447,51 @@ A simple local log (e.g. SQLite or a JSON/CSV log file), used both to drive the 
 - Daily total work time vs the base cap, and the live effective cap (base cap adjusted by walking shortfall, per §7)
 
 No cloud sync planned — this stays on your machine.
+
+**A break that merely elapsed is not a break that was taken (added
+2026-08-10).** Once a break can be walked away from (§2.3's reminder mode), it
+can also be worked straight through — and recording that as `break_taken`
+would quietly make the whole log useless for the one question it is kept to
+answer. Genuine input during a break is counted, and past **a quarter of that
+break's length** it is recorded as `break_ignored` and reported as "worked
+through", separately from a skip: a skip was bought from a budget and
+consciously chosen; this was not.
+
+Measured from how far the input watermark advanced rather than from the idle
+window, so a single mouse nudge buys one moment rather than a whole active
+second, and capped at one tick so waking the machine cannot credit the hours
+it slept. The threshold is a fraction rather than a fixed count so it scales
+with a long break and with `--demo`.
+
+The cycle still counts towards the long break either way. The break did
+elapse, and withholding the long one on a heuristic about mouse movement would
+make enforcement depend on a guess.
+
+**A logging bug this uncovered.** `BREAK_ENDED` read `is_long_break` from the
+engine snapshot, but `_reset_to_idle` clears that flag as the break ends,
+before the event is ever handled — so **every break recorded itself as
+"short", the 4th-cycle long ones included**. All 17 rows in the live database
+said `short` and none had ever said `long`. The length and duration are now
+captured at `BREAK_STARTED`, where they are still true. Exactly the shape of
+bug §8 exists to catch, and it took writing a second break statistic to
+notice it.
+
+**The countdown is shown in the tray icon itself (added 2026-08-10).** Windows
+offers no way to put text beside a notification-area icon — a 16px image and a
+hover tooltip is the whole interface — so the minutes to the next break are
+drawn onto the icon over a coloured plate, as battery and CPU meters do.
+Minutes only, rounded up, never "0" (a countdown sitting on zero reads as
+stuck), at most two characters, and nothing at all while idle or in Focus Mode
+where a number would be a lie. The plate colour distinguishes an ordinary
+countdown, a long break coming next, the break itself, and a countdown frozen
+by a call.
+
+This answers "have I done 25 minutes yet?", which is genuinely hard to know
+otherwise — work accrues only while you are actually typing, so a wall-clock
+hour of reading counts for very little and the interval is nothing like 25
+minutes long. It previously existed only in the hover tooltip, which means it
+was only ever read deliberately, and the number matters most when you are
+absorbed enough not to think of looking.
 
 ## 9. Proposed tech stack
 

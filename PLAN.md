@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 308 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 339 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,11 +25,12 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 308 tests
+.venv\Scripts\python.exe -m pytest tests                 # 339 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
 `--events [N]`, `--exclusions`, `--test-sounds`, `--shortcuts`, `--setup`.
+Run flags: `--dry-run`, `--demo FACTOR`, `--remind-only`, `--no-exclusions`.
 
 ### A macOS port is being handed to someone else
 A colleague with the same overfocusing problem is porting this to a Mac on her
@@ -148,6 +149,64 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### Session close — 2026-08-10 (fourth sitting: reminder mode, honest breaks, tray countdown)
+
+Three requested changes, all built and verified on Windows first — the Mac
+gets a tested app, not a porting project.
+
+**Reminder-only mode** (`Config.block_input`, a settings checkbox,
+`--remind-only`). The design point worth keeping: **whether blocking is wanted
+is a setting; whether it is possible is the OS's answer**, discovered by
+asking. A checkbox claiming to control the second would lie about enforcement,
+which is the worst failure this app has available — believing you were held to
+a break you were not. ANDed, and the lock screen names the actual cause,
+because "switched off in settings" and "this system will not allow it" send you
+to different places. Useful well beyond the port: trusting the lock gradually,
+or a day of presentations.
+
+**`break_taken` vs `break_ignored`.** A break that can be walked away from can
+be worked straight through, and filing those as taken would quietly make the
+log useless for the one question it is kept to answer. Input during a break is
+now counted — from how far the input watermark advanced, not the idle window,
+so a mouse nudge buys a moment rather than a second, and capped at a tick so
+waking the machine cannot credit the hours it slept. Past a quarter of that
+break's length it reads as worked through, a fraction so it scales with a long
+break and with `--demo`. The cycle still counts towards the long break either
+way: withholding it on a heuristic about mouse movement would make enforcement
+depend on a guess.
+
+**A bug that found, three lines from where I was working.** `BREAK_ENDED` read
+`is_long_break` off the snapshot, but `_reset_to_idle` clears it as the break
+ends, before the event is handled — so **every break ever logged said "short",
+long ones included**. All 17 rows in the live database, none ever "long".
+Captured at `BREAK_STARTED` now. Exactly the shape of accounting bug the
+history log exists to catch, and it took writing a second break statistic to
+see it.
+
+**The countdown in the tray icon.** Windows has no text slot beside a tray
+icon, so the minutes are drawn *onto* it over a coloured plate, as battery
+meters do. Colour distinguishes ordinary / long-break-next / on a break /
+frozen by a call; nothing while idle or in Focus Mode. Only redrawn when the
+number changes, since `refresh()` runs every second and the number moves once
+a minute.
+
+**Two habits earned their keep again.** The badge geometry was set by
+rendering at real 16px and *looking* — the first attempt was legible only when
+zoomed. Doing that caught the walking dot being buried under the new plate,
+**and caught my own test passing anyway**: it asserted the two images differed,
+and the plate's rounded corner left a sliver, so it was green while the thing
+it checked for was invisible. It counts green pixels now. Assert on what
+renders, not on what was requested.
+
+**Verified:** 339 tests (31 new), pyflakes clean, the icon inspected at true
+tray size across all four tones, and a scripted `Application` confirming the
+badge reaches the tray, reminder mode reaches the lock screen, and a
+worked-through long break reaches the log as `long; 0.8 min of input`.
+
+**Next:** restart the app to pick all of this up. Then use it — whether a
+quarter of a break is the right threshold, and whether two digits are readable
+in your tray, are both questions only a few days of use can answer.
 
 ### Session close — 2026-08-10 (third sitting: prepared for a macOS port)
 
