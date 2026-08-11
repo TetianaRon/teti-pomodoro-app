@@ -78,6 +78,7 @@ class SetupDialog:
             "warning_lead": tk.StringVar(value=_mins(c.warning_lead)),
             "safety_unlock": tk.BooleanVar(value=c.safety_unlock),
             "block_input": tk.BooleanVar(value=c.block_input),
+            "show_countdown": tk.BooleanVar(value=c.show_countdown),
             "skip_budget": tk.StringVar(
                 value=_mins(c.custom_skip_daily_budget)),
             "overtime": tk.StringVar(
@@ -174,6 +175,17 @@ class SetupDialog:
                "cycles")
         _field(frame, 4, "Warning before lock", self._vars["warning_lead"],
                "minutes")
+        ttk.Checkbutton(
+            frame, text="Show the countdown in the bottom-right corner",
+            variable=self._vars["show_countdown"],
+        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(
+            frame,
+            text=("A small pill saying how long until the next break. The "
+                  "warning before a break always appears\nin the same place, "
+                  "whether this is on or off."),
+            foreground="#555", justify="left",
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
     def _build_breaks(self, parent, row):
         frame = _section(parent, row, "Skipping a break")
@@ -365,6 +377,7 @@ class SetupDialog:
             warning_lead=lead * MINUTE,
             safety_unlock=bool(self._vars["safety_unlock"].get()),
             block_input=bool(self._vars["block_input"].get()),
+            show_countdown=bool(self._vars["show_countdown"].get()),
             custom_skip_daily_budget=skip_budget * MINUTE,
             overtime_work_duration=overtime * MINUTE,
         )

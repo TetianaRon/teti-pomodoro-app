@@ -48,7 +48,7 @@ def render_icon(walking: bool = False, size: int = 64):
 
     The countdown deliberately does **not** appear here. It was drawn onto
     the icon first, over a plate, because that is the only way Windows will
-    show a number in the notification area — but once `taskbar.py` put the
+    show a number in the notification area — but once `pill.py` put the
     same number in a legible pill beside the icon, the plate was covering
     two thirds of the tomato to say something already said better an inch
     to the left. The icon's job is being recognisable; the pill's job is

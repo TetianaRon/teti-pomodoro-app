@@ -32,8 +32,9 @@ from .exclusions import (
     NullDetector,
     create_detector,
 )
-from . import runtime, sounds, summary, taskbar, tray, walking
+from . import runtime, sounds, summary, tray, walking
 from .overlay import LockOverlay, SkipOffer, SkipOption, WarningBanner
+from .pill import CountdownPill
 from .timer import Event, PomodoroEngine, Position, State
 
 TICK_MS = 1000
@@ -132,7 +133,7 @@ class Application:
             on_stop_walk=self._stop_walk,
         )
         self.banner = WarningBanner(self._root, config)
-        self.pill = taskbar.TaskbarPill(self._root, config)
+        self.pill = CountdownPill(self._root)
         self.tray_status = tray.TrayStatus()
         self.tray = tray.TrayIcon(self.tray_status)
         self.summary_window = summary.SummaryWindow(self._root)
@@ -419,13 +420,18 @@ class Application:
         return str(ceil_minutes(seconds))
 
     def _update_pill(self, snapshot) -> None:
-        """The same countdown, spelled out beside the tray icons.
+        """The standing countdown in the bottom-right corner.
 
-        Driven from `_badge` rather than from its own reading of the state,
-        so the pill and the icon can never disagree about how long is left
-        — two places showing different numbers would undermine both.
+        Yields the corner whenever the warning is up: they are the same pill
+        in the same place, and the warning is the one with something to say.
+        Switched off entirely by `show_countdown` — unlike the warning, which
+        is the app doing its job rather than a convenience.
         """
-        if self.dry_run:
+        if self.dry_run or not self.config.show_countdown:
+            self.pill.hide()
+            return
+        if self.banner.visible:
+            self.pill.hide()
             return
         badge, tone = self._badge(snapshot)
         self.pill.update(f"{badge} min" if badge else "", tone)

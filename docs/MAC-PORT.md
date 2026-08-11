@@ -44,20 +44,20 @@ working, the 25/5 rhythm, the long break every 4th cycle, the daily work cap,
 the walking tally, the calendar meeting skip, the history log, the settings
 window — plus reminder mode, and the record of which breaks were actually
 taken rather than worked through, and time on calls counting towards the daily
-cap. Roughly 3,000 lines and **all 389 automated tests**. Nothing here needs
+cap. Roughly 3,000 lines and **all 397 automated tests**. Nothing here needs
 porting.
 
 **The hands — these touch the operating system.** Blocking input, covering
 every screen, the menu bar icon, playing chimes, detecting the camera and
 microphone, starting at login. This is the work, and it's about 600 lines.
 
-**And one module to skip outright: `taskbar.py`.** It shows the countdown
-beside the tray icons, which Windows offers no way to do, so it is 340 lines
-of workaround — a floating click-through window, composited over a photograph
-of the taskbar, that has since needed three more fixes for shell windows
-reporting themselves as full-screen, for the shell stealing its z-order, and
-for screen grabs failing on a locked session. A macOS menu bar item takes a
-text title. Do not port any of it; see Stage 4.
+**One module is now much less Windows-bound: `pill.py`.** It draws the corner
+countdown and the two-minute warning, and it is Tk plus Pillow apart from one
+call — `-transparentcolor`, which keys the pill's silhouette out. On macOS use
+a transparent Toplevel instead, which gives real per-pixel alpha and *better*
+edges than the keying trick. This replaced a 342-line module that faked a chip
+inside the Windows taskbar; that whole approach is gone, so there is nothing
+left here to port around.
 
 Run `--doctor` (step 3) and the app will tell you exactly which of these
 your machine currently has.
@@ -107,7 +107,7 @@ automatically — that's expected, not an error.
 .venv/bin/python -m pytest tests
 ```
 
-**You should see 389 passing.** This is the moment worth having early: it
+**You should see 397 passing.** This is the moment worth having early: it
 means every rule about breaks, caps, walking and history is intact on your
 machine, and anything that goes wrong from here is in the OS-facing parts
 only.
@@ -219,20 +219,11 @@ main thread. Options: `rumps` instead, or a different way to reach the
 controls. Until it's solved you have no menu, which means **no way to start a
 walk and no way to quit except Ctrl+C** in the Terminal you started it from.
 
-**Solving it also hands you the countdown for free**, which is the one thing
-on this list that is *easier* on a Mac. Windows cannot put text beside a tray
-icon at all, so `taskbar.py` goes to considerable lengths — a floating
-click-through window parked next to the notification area, composited over a
-photograph of the taskbar behind it — to show "5 min" there. A macOS menu bar
-item just takes a text title (`rumps`: `app.title = "5 min"`).
-
-**Ignore `taskbar.py` entirely.** All you need is `app._badge`, which returns
-the number and a colour name and is fully portable: set the menu bar title
-from it and you are done. Everything else in that file is fighting Windows —
-and it has needed three separate fixes since it was written, for shell
-windows that report themselves as full-screen, for the shell taking its
-z-order, and for screen grabs failing while the session is locked. None of
-those problems exist for a native title.
+**The countdown no longer depends on it.** It used to live in the tray, so it
+was blocked behind the menu bar problem; it is now a pill in the bottom-right
+corner drawn by `pill.py`, which works without a menu bar at all. If you would
+rather have it as a menu bar title once that is solved, `app._badge` returns
+the number and a colour name and is fully portable.
 
 **Camera and microphone detection** — so a break never lands in the middle of
 a call — has no macOS equivalent to what Windows uses, and is genuine

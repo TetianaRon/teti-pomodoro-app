@@ -516,92 +516,79 @@ captured at `BREAK_STARTED`, where they are still true. Exactly the shape of
 bug §8 exists to catch, and it took writing a second break statistic to
 notice it.
 
-**The countdown is shown in the taskbar (added 2026-08-10, moved 2026-08-11).**
-The minutes to the next break appear as "5 min" in a rounded pill beside the
-tray icons. Minutes only, rounded up, never "0" (a countdown sitting on zero
-through its last minute reads as stuck), and nothing at all while idle or in
-Focus Mode where a number would be a lie. The pill's colour distinguishes an
-ordinary countdown, a long break coming next, the break itself, and a
-countdown frozen by a call.
+**The countdown and the warning are one pill, in one corner (2026-08-11).**
+The minutes to the next break appear as "5 min" in a rounded pill — plate,
+time, tomato — in the bottom-right corner just above the taskbar. The
+two-minute warning is the *same pill* in a different colour, and it replaces
+the countdown in exactly that spot.
 
-This answers "have I done 25 minutes yet?", which is genuinely hard to know
-otherwise — work accrues only while you are actually typing, so a wall-clock
-hour of reading counts for very little and the interval is nothing like 25
-minutes long. It previously existed only in the hover tooltip, which means it
-was only ever read deliberately, and the number matters most when you are
-absorbed enough not to think of looking.
+That sharing is deliberate rather than economical: they occupy the same place
+one after the other, so any difference in shape or weight would read as two
+unrelated things competing for the position. `pill.py` owns the drawing;
+`app._badge` decides the number for both, so they cannot disagree.
 
-**It was first drawn onto the tray icon, and that is deliberately gone.** The
-notification area offers a 16px image and a tooltip and nothing else, so a
-number there has to be painted onto the icon over a plate, as battery meters
-do. It worked — but making two digits legible at that size took two thirds of
-the tomato, and once the pill existed an inch to the left, the icon was
-disfigured to say something already said better. The icon is back to being
-only a tomato, plus its green dot while a walk is running. **Two places
-showing the same number is one too many**, and if they ever disagreed both
-would be worthless.
+**It was first drawn onto the tray icon, then inside the taskbar, and both are
+gone.** The icon came first, because painting a number onto a 16px image is
+the only way Windows will show text in the notification area — but making two
+digits legible took two thirds of the tomato. Then it became a floating window
+anchored to `TrayNotifyWnd` and composited over a photograph of the taskbar
+strip behind it, which looked exactly like part of the taskbar and cost three
+separate bugs to get there: shell windows reporting themselves as full-screen,
+the shell taking its z-order, and screen grabs failing on a locked session.
+Sitting plainly above the taskbar needs no photograph, no anchoring, and no
+guessing which tray slot the icon landed in. **The position nobody had asked
+to be exact was paying for itself in defects.**
 
-**It is not actually in the taskbar, because nothing can be.** The
-notification area offers an icon and a tooltip and no way to show text;
-deskbands, the mechanism that once let a program put a control in the taskbar,
-were deprecated years ago and Windows 11 dropped third-party toolbars
-entirely. The pill is a borderless, click-through, always-on-top window
-positioned immediately left of `TrayNotifyWnd` — visually part of the taskbar,
-architecturally a window floating over it. Windows 11 no longer exposes the
-individual icon windows, so it anchors to the notification area as a whole;
-if this app's icon is in the overflow, the pill sits by the chevron rather
-than by the tomato.
+Decisions, each settled by putting it on screen and looking:
 
-Three decisions, each made by putting it on screen and looking:
+- **The silhouette is keyed, not composited.** Over ordinary windows there is
+  nothing stable to photograph, so one colour is declared transparent. Keying
+  compares colours exactly and an anti-aliased edge is a blend of pill and key
+  that matches neither, so it survived as a magenta fringe; the alpha is
+  thresholded to binary before keying, and a slightly darker ring inside the
+  edge softens the staircase that leaves on the curves.
+- **Opaque.** Partial alpha (0.90, inherited from when the banner was a plain
+  rectangle) let the window behind show through the plate, which read as grime
+  and cost the countdown its legibility. Fading is now only for getting out of
+  the way of the cursor.
+- **Dark amber for the warning.** A bright amber plate was tried first and the
+  tomato, being red, vanished into it at the size the warning arrives at. What
+  makes the warning noticed is the attention pass, not the loudness of the fill.
+- **Minutes, changing once a minute**, for the countdown. A ticking seconds
+  counter was considered and rejected: in the corner of the eye it reads as
+  pressure rather than information. The warning does tick seconds, because
+  that is the one moment urgency is the point.
 
-- **It composites over a photograph of the taskbar behind it.** Colour-keying
-  a transparent background was tried first and left a magenta fringe on the
-  rounded corners, because an anti-aliased edge pixel is a blend of pill and
-  key colour and matches neither. Grabbing the backdrop and blending onto it
-  gives clean edges for nothing, and the strip it covers is empty taskbar, so
-  the photograph stays true.
-- **Fixed width**, sized for the longest countdown, or it would jitter
-  sideways once a minute and re-grab its backdrop each time. The text is
-  centred in the space left of the tomato, since a short countdown otherwise
-  sat hard against the left edge.
-- **Minutes, changing once a minute**, matching the icon and driven from the
-  same function so the two can never disagree. A ticking seconds counter was
-  considered and rejected: in the corner of the eye it reads as pressure
-  rather than information.
+The countdown is **optional** (`show_countdown`, a settings checkbox): some
+days a number in the corner of your eye is what you want and some days it is
+not. The warning is **not** optional — that is the app doing its job, and
+hiding it would leave the lock arriving unannounced. The countdown yields the
+corner whenever the warning is up.
 
-Shown only while something is counting down, and hidden when a window covers
-the screen so it cannot float over a video, or when an auto-hiding taskbar has
-slid away. The full-screen check compares rectangles rather than asking
-`SHQueryUserNotificationState`, which reports busy for *any* full-screen
-window — this app's own lock included, a mistake that already cost this
-project once (§3).
+Shown only while something is counting down, and hidden when a real window
+fills the screen so it cannot float over a video. That check compares
+rectangles rather than asking `SHQueryUserNotificationState`, which reports
+busy for *any* full-screen window including this app's own lock (§3) — but a
+rectangle alone is not enough either: the desktop (`Progman`, measured
+spanning every monitor) and the input-experience host
+(`Windows.UI.Core.CoreWindow`, exactly screen-sized) both satisfy it, so
+clicking the desktop or switching keyboard language used to make the pill
+vanish. Shell surfaces are excluded by class. An ordinary *maximised* window
+never reaches the test: Windows inflates its rect by the invisible resize
+border to (−8, −8, 1928, 1040) on a 1080p screen, stopping short of the
+taskbar strip.
 
-**A rectangle alone was not enough, and the pill disappeared for it.** Three
-separate causes, all found from one report of "it vanishes sometimes":
+**tkinter would not keep the position.** Setting `geometry()` on a mapped
+`overrideredirect` window reports back correctly and then reverts to the
+window's first position once idle processing runs — measured while the warning
+animated: it asked for +1795+990, tk agreed, and the window stayed where it
+had arrived. The visible result was a warning that shrank to nothing mid-screen
+instead of settling in the corner. The rectangle is therefore asserted through
+`SetWindowPos` every tick, alongside the z-order, which makes tk's opinion
+irrelevant.
 
-- **Shell surfaces report screen-filling bounds.** The desktop (`Progman`,
-  measured at −1920, 0, 3840, 1200 across two monitors) and the input
-  experience host (`Windows.UI.Core.CoreWindow`, at exactly 0, 0, 1920, 1080)
-  both satisfied the test, so clicking the desktop, pressing Win+D or
-  switching language took the pill away. They are excluded by window class
-  now. An ordinary *maximised* window never reached this: Windows inflates its
-  rect by the invisible resize border to (−8, −8, 1928, 1040), which stops
-  short of the taskbar strip.
-- **The z-order was taken once and never retaken.** The shell puts its own
-  windows above ours whenever the taskbar is clicked or Start is opened, and
-  the pill only redrew when the number changed — once a minute — so it spent
-  whole minutes behind the taskbar. It now reasserts topmost every tick, via
-  `SetWindowPos` with `SWP_NOACTIVATE` rather than tkinter's `lift()`, because
-  a chip in the taskbar stealing focus once a second would be intolerable.
-- **A single failure was permanent.** Any exception latched a `_broken` flag
-  for the life of the process, and locking the workstation is exactly such a
-  failure: a screen grab of a locked session comes back black or fails
-  outright. Failures now back off for 20 seconds and retry, and a
-  suspiciously flat backdrop grab is refused rather than cached — otherwise a
-  black rectangle would be baked into the taskbar for the rest of the day.
-
-On macOS this is all unnecessary: a menu bar item takes a text title
-directly, so the number sits beside the icon natively.
+On macOS none of the keying is needed: a transparent Toplevel gives real
+per-pixel alpha, and the standing countdown could simply be the menu bar title.
 
 ## 9. Proposed tech stack
 

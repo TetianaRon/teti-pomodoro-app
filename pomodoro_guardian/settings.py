@@ -106,6 +106,7 @@ class Settings:
                 "block_input": c.block_input,
                 "safety_unlock": c.safety_unlock,
                 "safety_unlock_hold_seconds": c.safety_unlock_hold,
+                "show_countdown": c.show_countdown,
                 "banner_alpha": c.banner_alpha,
                 "banner_alpha_hover": c.banner_alpha_hover,
                 "break_ignored_fraction": c.break_ignored_fraction,
@@ -173,6 +174,8 @@ class Settings:
             count_exclusions_as_work=bool(
                 exclusions.get(
                     "count_as_work", d.count_exclusions_as_work)),
+            show_countdown=bool(
+                lock.get("show_countdown", d.show_countdown)),
             block_input=bool(
                 lock.get("block_input", d.block_input)),
             break_ignored_fraction=_num(

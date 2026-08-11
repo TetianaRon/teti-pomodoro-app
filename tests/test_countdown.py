@@ -6,10 +6,10 @@ reading counts for very little. It used to live only in the hover tooltip,
 which means it was only ever read deliberately, and it matters most when
 you are absorbed enough not to think of looking.
 
-One function decides it, and `taskbar.py` renders it. It was briefly drawn
-onto the tray icon as well, and that is deliberately gone: two things
-showing the same number is one too many, and the plate needed to make it
-legible covered most of the tomato.
+One function decides it, and `pill.py` draws it. It was briefly drawn onto
+the tray icon as well, and that is deliberately gone: two things showing the
+same number is one too many, and the plate needed to make it legible covered
+most of the tomato.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import pytest
 from pomodoro_guardian.app import Application, _short, ceil_minutes
 from pomodoro_guardian.config import Config
 from pomodoro_guardian.state import AppState
-from pomodoro_guardian.taskbar import PLATE
+from pomodoro_guardian.pill import TONES
 from pomodoro_guardian.timer import Snapshot, State
 from pomodoro_guardian.tray import TrayIcon, TrayStatus, render_icon
 
@@ -55,12 +55,11 @@ def test_it_never_shows_zero():
     assert app()._badge(snap(State.WORK, remaining=0.4))[0] == "1"
 
 
-def test_a_full_interval_fits_the_width_the_pill_reserves():
-    """The pill is a fixed width, sized for taskbar.WIDEST, so it must."""
-    from pomodoro_guardian import taskbar
-
+def test_a_full_interval_reads_as_a_short_countdown():
+    """The pill sizes itself to its text now, but a runaway number would
+    still stretch it across the corner."""
     badge, _tone = app()._badge(snap(State.WORK, remaining=25 * 60))
-    assert len(f"{badge} min") <= len(taskbar.WIDEST)
+    assert len(f"{badge} min") <= len("88 min")
 
 
 def test_idle_shows_no_number_at_all():
@@ -110,7 +109,7 @@ def test_every_tone_the_app_can_ask_for_has_a_colour():
             snap(State.BREAK, 300), snap(State.WORK, 300, paused=True),
         )
     }
-    assert asked <= set(PLATE), f"no plate colour for {asked - set(PLATE)}"
+    assert asked <= set(TONES), f"no colour for {asked - set(TONES)}"
 
 
 # -- the pill and its tooltip must never contradict each other ---------

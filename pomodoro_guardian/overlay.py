@@ -23,8 +23,9 @@ import time
 import tkinter as tk
 from dataclasses import dataclass
 
-from . import media
+from . import media, pill
 from .config import DEFAULT, Config
+from .pill import CountdownPill
 
 
 class InputSuppressor:
@@ -866,105 +867,84 @@ class LockOverlay:
 
 
 class WarningBanner:
-    """The 2-minute heads-up before the lock (SPEC §2.3).
+    """The two-minute heads-up before the lock (SPEC §2.3).
 
     Shown on **every** monitor, not just the primary one. First real-use
     feedback was that the warning fired correctly and went unnoticed
-    entirely: it was a small toast in one corner of one screen while the
-    work was happening on another.
+    entirely: it was a small toast in one corner of one screen while the work
+    was happening on another.
 
-    So it now arrives with an **attention pass** — large and centred on
-    each screen, then shrinking as it travels to the bottom-right corner,
-    where it stays for the rest of the countdown. Motion in the middle of
-    the screen is hard to miss; a static corner toast plainly was not.
+    So it arrives with an **attention pass** — large and centred on each
+    screen, then shrinking as it travels to the bottom-right corner, where it
+    settles at exactly the size and place of the standing countdown and takes
+    its spot. Motion in the middle of the screen is hard to miss; a static
+    corner toast plainly was not.
+
+    It is the *same pill* as the countdown (`pill.py`), in a different
+    colour. That is deliberate rather than economical: they occupy the same
+    corner, one replacing the other, so any difference in shape or weight
+    would read as two unrelated things competing for the position.
 
     It must not steal focus or block anything — the whole point is letting
-    you wrap up first — so it is **click-through**: every click passes
-    straight to whatever is underneath. It stays clearly readable and
-    *fades* when the cursor moves over it, so you can see what it covers
-    at the moment you reach for it.
-
-    Because a click-through window receives no mouse events, `<Enter>` and
-    `<Leave>` never fire. Hover is detected by polling the cursor position
-    against each banner's rectangle.
+    you wrap up first — so it is click-through, and it fades when the cursor
+    comes near so you can see whatever it is sitting over. Because a
+    click-through window receives no mouse events, `<Enter>` and `<Leave>`
+    never fire; hover is found by polling the cursor against each rectangle.
     """
-
-    BG = "#2b2113"
-    FG = "#ffd8a8"
 
     #: The attention pass. Long enough to register while looking elsewhere,
     #: short enough not to sit over the work being wrapped up.
     HOLD_SECONDS = 1.4
     TRAVEL_SECONDS = 0.9
     BIG_SCALE = 4.5
-    BASE_FONT = 14
-    FRAME_MS = 25
+    #: 30fps rather than 40: a pill has to be redrawn to change size, and at
+    #: the largest scale that costs about 22ms. The extra headroom keeps the
+    #: animation off the tick's back.
+    FRAME_MS = 33
 
     def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
         self._root = root
         self._config = config
-        self._windows: list[tk.Toplevel] = []
-        self._labels: list[tk.Label] = []
-        self._rects: list[tuple[int, int, int, int]] = []
+        self._windows: list[pill.PillWindow] = []
+        self._areas: list[tuple] = []
+        self._rects: list[tuple] = []
         self._poll_job: str | None = None
         self._anim_job: str | None = None
         self._started_at = 0.0
-        self._hovering = False
         self._text = "Break in 0:00"
-
-    def show(self) -> None:
-        """Open on every monitor and begin the attention pass."""
-        if self._windows:
-            return
-        self._rects = monitor_rects(self._root)
-        self._started_at = time.monotonic()
-        for rect in self._rects:
-            window, label = self._build(rect)
-            self._windows.append(window)
-            self._labels.append(label)
+        self._tone = "warn"
         self._hovering = False
-        self._schedule_poll()
-        self._animate()
 
-    def _build(self, rect):
-        window = tk.Toplevel(self._root)
-        window.overrideredirect(True)
-        window.attributes("-topmost", True)
-        window.configure(bg=self.BG)
-
-        # Seeded with representative text, not "": the window is measured to
-        # place it, and an empty label measures as bare padding. Positioning
-        # off that width once put the right edge past the monitor and
-        # spilled the banner onto the next screen.
-        label = tk.Label(
-            window, text=self._text,
-            font=("Segoe UI", int(self.BASE_FONT * self.BIG_SCALE), "bold"),
-            bg=self.BG, fg=self.FG, padx=22, pady=14,
-        )
-        label.pack()
-        window.update_idletasks()
-        self._place(window, rect, 1.0)
-
-        # -alpha must be set before WS_EX_TRANSPARENT is added: setting it is
-        # what makes the window layered in the first place.
-        window.attributes("-alpha", self._config.banner_alpha)
-        self._make_click_through(window)
-        return window, label
+    # -- what the app calls -------------------------------------------
 
     @property
     def visible(self) -> bool:
         return bool(self._windows)
 
+    def show(self, tone: str = "warn") -> None:
+        """Open on every monitor and begin the attention pass."""
+        if self._windows:
+            return
+        self._tone = tone
+        self._started_at = time.monotonic()
+        self._areas = [
+            pill.work_area(self._root, rect)
+            for rect in monitor_rects(self._root)
+        ]
+        self._windows = [pill.PillWindow(self._root) for _ in self._areas]
+        self._rects = [(0, 0, 0, 0)] * len(self._areas)
+        self._hovering = False
+        self._draw()
+        self._schedule_poll()
+        self._animate()
+
     def set_text(self, text: str) -> None:
         """Change the message on every screen, keeping each anchored."""
+        if text == self._text:
+            return
         self._text = text
-        for window, label in zip(self._windows, self._labels):
-            before = window.winfo_reqwidth()
-            label.configure(text=text)
-            window.update_idletasks()
-            if window.winfo_reqwidth() != before:
-                self._reposition()
-            window.attributes("-topmost", True)
+        if self._windows:
+            self._draw()
 
     def tick(self, remaining: float) -> None:
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
@@ -973,11 +953,16 @@ class WarningBanner:
     def notice(self, text: str) -> None:
         """Show a standing message rather than a countdown.
 
-        Used for the stuck-device warning (SPEC §3), which would otherwise
-        only reach a console nobody is looking at.
+        Used for the over-the-cap marker and the stuck-device warning
+        (SPEC §3, §5), which would otherwise only reach a console nobody is
+        looking at. Drawn in the frozen colour rather than the warning one:
+        nothing is about to happen, so it should not read like it.
         """
         if not self._windows:
-            self.show()
+            self.show(tone="held")
+        elif self._tone != "held":
+            self._tone = "held"
+            self._draw()
         self.set_text(text)
 
     def hide(self) -> None:
@@ -985,88 +970,73 @@ class WarningBanner:
             if job is not None:
                 try:
                     self._root.after_cancel(job)
-                except Exception:
+                except Exception:   # pragma: no cover - a dead job is fine
                     pass
         self._poll_job = self._anim_job = None
         for window in self._windows:
-            window.destroy()
+            window.hide()
         self._windows = []
-        self._labels = []
+        self._areas = []
+        self._rects = []
 
     # -- the attention pass -------------------------------------------
 
-    def _animate(self) -> None:
-        """Hold large and centred, then shrink into the bottom-right corner.
+    def _eased(self) -> float:
+        """0 while held large and centred, 1 once settled in the corner.
 
-        Driven by its own ~40fps timer rather than the app's one-second
-        tick, which is far too coarse for motion.
+        Ease-out, so it leaves the centre briskly and arrives gently.
         """
+        progress = (
+            (time.monotonic() - self._started_at - self.HOLD_SECONDS)
+            / self.TRAVEL_SECONDS
+        )
+        if progress <= 0:
+            return 0.0
+        if progress >= 1:
+            return 1.0
+        return 1 - (1 - progress) ** 3
+
+    def _animate(self) -> None:
         if not self._windows:
             return
-        elapsed = time.monotonic() - self._started_at
-        progress = (elapsed - self.HOLD_SECONDS) / self.TRAVEL_SECONDS
-        if progress >= 1.0:
-            self._apply(1.0)      # resident: small, bottom-right
+        if self._eased() >= 1.0:
+            self._draw()            # settled: resident size and place
             self._anim_job = None
             return
-        # Ease-out, so it leaves the centre briskly and settles gently.
-        eased = 0.0 if progress <= 0 else 1 - (1 - progress) ** 3
-        self._apply(eased)
+        self._draw()
         self._anim_job = self._root.after(self.FRAME_MS, self._animate)
 
-    def _apply(self, eased: float) -> None:
-        """Position and size every banner for a point in the animation."""
+    def _draw(self) -> None:
+        """Render at the current size and place it on every screen."""
+        eased = self._eased()
         scale = self.BIG_SCALE + (1.0 - self.BIG_SCALE) * eased
-        size = max(self.BASE_FONT, int(round(self.BASE_FONT * scale)))
-        for window, label, rect in zip(self._windows, self._labels, self._rects):
-            if label.cget("font") != f"{{Segoe UI}} {size} bold":
-                label.configure(font=("Segoe UI", size, "bold"))
-            window.update_idletasks()
-            self._place(window, rect, eased)
+        height = max(
+            CountdownPill.HEIGHT, int(round(CountdownPill.HEIGHT * scale))
+        )
+        image = pill.render(self._text, self._tone, height)
 
-    def _place(self, window, rect, eased: float) -> None:
-        """Interpolate between the centre of `rect` and its bottom-right."""
-        left, top, width, height = rect
-        w = window.winfo_reqwidth()
-        h = window.winfo_reqheight()
-        margin = 24
-        centre_x = left + (width - w) // 2
-        centre_y = top + (height - h) // 2
-        corner_x = left + width - w - margin
-        corner_y = top + height - h - margin
-        x = int(centre_x + (corner_x - centre_x) * eased)
-        y = int(centre_y + (corner_y - centre_y) * eased)
-        window.geometry(f"+{x}+{y}")
-
-    def _reposition(self) -> None:
-        """Re-anchor after the text changes width, without re-animating."""
-        eased = 0.0 if self._anim_job is not None else 1.0
-        for window, rect in zip(self._windows, self._rects):
-            self._place(window, rect, eased)
+        alpha = (
+            self._config.banner_alpha_hover if self._hovering
+            else self._config.banner_alpha
+        )
+        rects = []
+        for index, (window, area) in enumerate(zip(self._windows, self._areas)):
+            x, y = self._place(area, image.width, image.height, eased)
+            window.show(image, x, y, alpha=alpha)
+            window.raise_above()
+            rects.append((x, y, image.width, image.height))
+        self._rects = rects
 
     @staticmethod
-    def _make_click_through(window: tk.Toplevel) -> None:
-        """Pass every click through to whatever is underneath.
+    def _place(area, width: int, height: int, eased: float) -> tuple:
+        """Interpolate between the centre of `area` and its bottom-right."""
+        centre_x = area[0] + (area[2] - area[0] - width) // 2
+        centre_y = area[1] + (area[3] - area[1] - height) // 2
+        corner_x, corner_y = pill.corner(area, width, height)
+        return (int(centre_x + (corner_x - centre_x) * eased),
+                int(centre_y + (corner_y - centre_y) * eased))
 
-        Degrades to a normal (still translucent) window if pywin32 is
-        missing — the banner blocking a small area is a far smaller problem
-        than it failing to appear.
-        """
-        try:
-            import win32con
-            import win32gui
-        except ImportError:
-            return
-        hwnd = win32gui.GetParent(window.winfo_id()) or window.winfo_id()
-        style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        win32gui.SetWindowLong(
-            hwnd,
-            win32con.GWL_EXSTYLE,
-            style
-            | win32con.WS_EX_LAYERED       # already set by -alpha; harmless
-            | win32con.WS_EX_TRANSPARENT   # the click-through part
-            | win32con.WS_EX_NOACTIVATE,   # never steal focus
-        )
+    # -- fading out of the way ----------------------------------------
 
     def _schedule_poll(self) -> None:
         self._poll_job = self._root.after(
@@ -1074,39 +1044,32 @@ class WarningBanner:
         )
 
     def _poll_hover(self) -> None:
-        """Fade whichever banner the cursor is over.
+        """Fade every banner once the cursor is over any of them.
 
-        Faded individually rather than all at once: the cursor can only be
-        over one screen, and dimming the others would hide the warning on
-        the screen you are *not* looking at — the exact failure this
-        redesign was for.
+        The cursor can only be on one screen, but the pill is small and in a
+        corner: the reason to fade is that you are reaching for what is
+        underneath, and on the screen you are reaching on that is the only
+        one that matters. Faded together rather than individually, because a
+        30px pill has nothing left to hide once you are near it.
         """
         if not self._windows:
             return
         try:
-            import win32api
-
-            x, y = win32api.GetCursorPos()
-        except ImportError:
+            x, y = self._root.winfo_pointerxy()
+        except tk.TclError:     # pragma: no cover - teardown race
             self._schedule_poll()
             return
 
-        any_hover = False
-        for window in self._windows:
-            try:
-                wx, wy = window.winfo_rootx(), window.winfo_rooty()
-                over = (
-                    wx <= x < wx + window.winfo_width()
-                    and wy <= y < wy + window.winfo_height()
-                )
-                window.attributes(
-                    "-alpha",
-                    self._config.banner_alpha_hover
-                    if over
-                    else self._config.banner_alpha,
-                )
-                any_hover = any_hover or over
-            except tk.TclError:
-                continue
-        self._hovering = any_hover
+        over = any(
+            left <= x < left + width and top <= y < top + height
+            for left, top, width, height in self._rects
+        )
+        if over != self._hovering:
+            self._hovering = over
+            alpha = (
+                self._config.banner_alpha_hover if over
+                else self._config.banner_alpha
+            )
+            for window in self._windows:
+                window.set_alpha(alpha)
         self._schedule_poll()

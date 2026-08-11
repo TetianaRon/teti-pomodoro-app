@@ -27,13 +27,23 @@ class Config:
     # How long before the lock the warning appears, so you can wrap up.
     warning_lead: float = 2 * MINUTE
 
+    # The standing countdown pill in the bottom-right corner. Optional: it
+    # answers "have I done 25 minutes yet?" at a glance, which some days is
+    # what you want and other days is a number in the corner of your eye.
+    # The two-minute warning is **not** optional — that one is the app doing
+    # its job, and hiding it would leave the lock arriving unannounced.
+    show_countdown: bool = True
+
     # The warning banner is click-through, so it can never block anything.
     # It stays clearly readable by default — it has two minutes to be
     # noticed, and a warning nobody sees is useless — then fades as the
     # cursor approaches, so you can see whatever it is sitting over.
     # Hover is detected by polling the cursor, since a click-through window
     # receives no mouse events of its own.
-    banner_alpha: float = 0.90
+    # Opaque at rest. It was 0.90 while the banner was a plain rectangle;
+    # once it became a pill the window behind showed straight through the
+    # plate, which read as grime rather than as translucency.
+    banner_alpha: float = 1.00
     banner_alpha_hover: float = 0.15
     banner_hover_poll: float = 0.12
 

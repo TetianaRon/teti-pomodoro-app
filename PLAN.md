@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 389 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 397 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 389 tests
+.venv\Scripts\python.exe -m pytest tests                 # 397 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -155,6 +155,60 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-11 — the countdown became a corner pill, and the warning became the same pill
+
+Two requests in one: move the countdown out of the taskbar into the
+bottom-right corner just above it, and give the two-minute warning that same
+pill so it pops up centred and then **replaces** the countdown in that corner.
+Plus a settings toggle for the countdown — the warning stays mandatory, since
+that one is the app doing its job.
+
+**The move deleted more than it added.** The in-taskbar version was a floating
+window anchored to `TrayNotifyWnd` and composited over a photograph of the
+strip behind it. It looked exactly like part of the taskbar, and it had cost
+three separate bug fixes to get there: shell windows reporting themselves as
+full-screen, the shell taking its z-order, and screen grabs failing on a locked
+session. Sitting plainly above the taskbar needs no photograph, no anchoring,
+and no guessing which tray slot the icon landed in. `taskbar.py` is gone (342
+lines) and `pill.py` (about 470, shared by both users) replaces it.
+
+**Sharing the drawing is the point, not a saving.** The countdown and the
+warning occupy the same corner one after the other, so any difference in shape
+or weight would read as two unrelated things competing for the spot. Measured
+rather than asserted: the settled warning matches the countdown's height, right
+edge and bottom edge exactly.
+
+**Four things only looking could have settled:**
+
+- The silhouette is **keyed**, since there is nothing stable to photograph over
+  ordinary windows — and keying compares colours exactly, so anti-aliased edges
+  survived as a magenta fringe. Thresholding the alpha to binary fixes it; a
+  darker ring inside the edge hides the staircase left on the curves.
+- **Opaque.** The inherited 0.90 alpha let the window behind show through the
+  plate, which read as grime rather than translucency.
+- **Dark amber for the warning.** Bright amber was tried first and the tomato,
+  being red, vanished into it at the size the warning arrives at.
+- The tomato was being rendered supersampled *and* `render_icon` already
+  supersamples internally, so a 135px pill cost **52ms** — twice the animation's
+  frame budget, on the thread that also runs the tick. Pasting it once at final
+  size brought that to 22ms.
+
+**tkinter would not keep the position, which took the longest to find.**
+`geometry()` on a mapped `overrideredirect` window reports back correctly and
+then reverts to the window's first position once idle processing runs. The
+symptom was a warning that shrank to nothing mid-screen instead of settling in
+the corner — and it survived four wrong hypotheses (`raise_above` clobbering
+the move, `update()` between frames, the geometry cache short-circuiting,
+hover-fade hiding it), each disproved by a standalone repro that *worked*. What
+found it was instrumenting the real run and printing what tk reported straight
+after each call. The rectangle is now asserted through `SetWindowPos` every
+tick alongside the z-order, so tk's opinion no longer matters.
+
+**Verified:** 397 tests (34 new), pyflakes clean, and photographed in the real
+corner — the countdown in three tones, the warning arriving large and centred,
+and the warning settled on the countdown's exact anchor with one pill per
+monitor in each screen's own corner.
 
 ### 2026-08-11 — meetings were invisible to the daily cap
 

@@ -115,15 +115,11 @@ def _probe_monitors() -> tuple[bool, str]:
 
 
 def _probe_pill() -> tuple[bool, str]:
-    from .taskbar import taskbar_rects
+    from .pill import font_for
 
-    bar, notify = taskbar_rects()
-    if bar is None:
-        return False, "no taskbar found to sit in"
-    if notify is None:
-        return True, f"taskbar {bar[2] - bar[0]}x{bar[3] - bar[1]}, "\
-                     f"no notification area — will sit at the far edge"
-    return True, f"notification area starts at x={notify[0]}"
+    if font_for(20) is None:
+        return False, "no bold face available to draw a legible countdown"
+    return True, "a corner pill can be drawn and keyed"
 
 
 def _probe_click_through() -> tuple[bool, str]:
@@ -325,16 +321,18 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         key="pill",
-        what="The countdown spelled out beside the tray icons",
-        without_it="the minutes to the next break are only in the hover "
-                   "tooltip, read on purpose rather than at a glance — which "
-                   "is the one time they are least likely to be read",
-        reference="taskbar.py — TaskbarPill",
-        on_macos="**Easier here than on Windows.** A menu bar item takes a "
-                 "text title directly (rumps: `app.title = '5 min'`), so the "
-                 "whole floating-window trick is unnecessary — the number "
-                 "goes next to the icon natively. Depends on solving the "
-                 "menu bar first.",
+        what="The countdown pill, and the two-minute warning it shares a "
+             "drawing with",
+        without_it="the warning falls back to nothing on screen, and the "
+                   "minutes to the next break live only in the tray tooltip",
+        reference="pill.py — render(), CountdownPill",
+        on_macos="Should mostly work: it is Tk plus Pillow. The one Windows "
+                 "piece is `-transparentcolor`, which keys the pill's "
+                 "silhouette out — on macOS use a transparent Toplevel "
+                 "instead (`wm attributes -transparent`), which gives real "
+                 "per-pixel alpha and *better* edges than the keying trick. "
+                 "The standing countdown could also just be the menu bar "
+                 "title (rumps: `app.title = '5 min'`).",
     ),
     Capability(
         key="click_through",
