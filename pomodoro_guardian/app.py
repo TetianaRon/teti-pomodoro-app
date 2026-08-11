@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import queue
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -842,6 +843,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="report what is currently holding breaks off, then exit",
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="report what this machine can and cannot do, then exit",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         metavar="PATH",
@@ -849,6 +855,46 @@ def build_parser() -> argparse.ArgumentParser:
              "PomodoroGuardian\\config.json)",
     )
     return parser
+
+
+def report_doctor() -> int:
+    """`--doctor`: what this machine can do, and what the app loses if not.
+
+    Written to be pasted somewhere useful. On a fully working Windows
+    machine it is a receipt; on a half-ported Mac it is the to-do list, in
+    priority order, with the consequence of each gap spelled out — because
+    the app degrades quietly by design, and quiet degradation is only
+    honest if something says so out loud.
+    """
+    from . import platform as platform_module
+
+    print(f"Pomodoro Guardian — capabilities on {platform_module.platform_name()}")
+    print(f"Python {sys.version.split()[0]}\n")
+
+    missing = []
+    for cap, available, detail in platform_module.report():
+        mark = "ok  " if available else "MISSING"
+        print(f"  [{mark}] {cap.what}")
+        print(f"           {detail}")
+        if not available:
+            missing.append(cap)
+        print()
+
+    if not missing:
+        print("Everything the app needs is available here.")
+        return 0
+
+    print(f"{len(missing)} missing, most important first:\n")
+    for cap in missing:
+        print(f"  {cap.what}")
+        print(f"    without it : {cap.without_it}")
+        print(f"    reference  : {cap.reference}")
+        if cap.on_macos and platform_module.MACOS:
+            print(f"    on macOS   : {cap.on_macos}")
+        print()
+    if platform_module.MACOS:
+        print("Porting notes: docs/MAC-PORT.md")
+    return 0
 
 
 def report_exclusions(
@@ -943,6 +989,9 @@ def main(argv: list[str] | None = None) -> int:
                 amount = f"{seconds:.0f}s" if seconds is not None else ""
                 print(f"  {stamp}  {kind:16} {amount:>8}  {detail or ''}")
         return 0
+
+    if args.doctor:
+        return report_doctor()
 
     if args.test_sounds:
         settings = settings_module.load(path)

@@ -70,24 +70,46 @@ class InputSuppressor:
 
         threading.Thread(target=guard, daemon=True).start()
 
-    def start(self) -> None:
+    def start(self) -> bool:
+        """Begin swallowing input. Says whether suppression is really live.
+
+        The caller needs the answer, because it changes what the lock *is*:
+        with suppression it enforces a break, without it the overlay is a
+        reminder you can click past. Both are useful; being unable to tell
+        them apart is not.
+
+        Nothing here is allowed to raise. `lock()` runs from the tick, and
+        the tick's last statement is the `after()` call that schedules the
+        next one — so an exception escaping this method would stop the loop
+        rescheduling and leave a borderless, always-on-top window on every
+        screen with nothing alive to take it down. A lock that fails to
+        block input is a far better outcome than one that cannot end.
+
+        `ImportError` alone does not cover it: on macOS pynput imports
+        cleanly and then fails to create the event tap when Accessibility
+        permission has not been granted.
+        """
         if self._listeners:
-            return
+            return True
         self._stopped.clear()
         self.arm_watchdog()
         try:
             from pynput import keyboard
-        except ImportError:
-            # No pynput: the overlay still covers the screen, it just won't
-            # block input underneath. Better degraded than not locking.
-            return
 
-        self._escape_key = keyboard.Key.esc
-        self._fired = False
-        self._listeners = [self._keyboard_listener(), self._mouse_listener()]
-        for listener in self._listeners:
-            listener.daemon = True
-            listener.start()
+            self._escape_key = keyboard.Key.esc
+            self._fired = False
+            listeners = [self._keyboard_listener(), self._mouse_listener()]
+            for listener in listeners:
+                listener.daemon = True
+                listener.start()
+        except Exception:
+            # No pynput, or the OS refused the hook: the overlay still
+            # covers the screen, it just won't block input underneath.
+            self._listeners = []
+            return False
+
+        self._listeners = listeners
+        return True
 
     def _keyboard_listener(self):
         from pynput import keyboard
@@ -309,11 +331,17 @@ class LockOverlay:
         self._hints: list[tk.Label] = []
         self._bodies: list[tk.Frame] = []
         self._menus: list[tk.Frame] = []
+        self._notices: list[tk.Label] = []
         self._offer = SkipOffer()
         self._menu_open = False
         self._swallow_escape = False
         self._suppressor: InputSuppressor | None = None
         self._released_early = False
+        # Whether the current lock is actually blocking input, or is only a
+        # full-screen reminder. Drives what the screen admits to, and
+        # whether the z-order is fought for — see _bind_local_keys.
+        self._suppressing = False
+        self._local_hold: str | None = None
         # Input arrives on pynput's listener thread, and tkinter must only
         # ever be touched from the thread running its loop. Even root.after()
         # is unsafe from outside — it happens to work while mainloop() is
@@ -330,6 +358,11 @@ class LockOverlay:
     def released_early(self) -> bool:
         """True if the safety hold released this lock before time was up."""
         return self._released_early
+
+    @property
+    def suppressing(self) -> bool:
+        """Whether the current lock is enforcing, or only reminding."""
+        return self._suppressing
 
     def lock(self, is_long_break: bool, duration: float) -> None:
         if self._windows:
@@ -368,7 +401,9 @@ class LockOverlay:
             on_key=self._key_pressed,
             on_key_release=self._key_released,
         )
-        self._suppressor.start()
+        self._suppressing = self._suppressor.start()
+        if not self._suppressing:
+            self._admit_reminder_only()
 
     def tick(self, remaining: float) -> None:
         """Refresh the countdown, handle input, and reassert always-on-top."""
@@ -390,6 +425,14 @@ class LockOverlay:
         # Something else going topmost mid-break would defeat the lock, so
         # we take the z-order back on every tick rather than trusting the
         # attribute to hold for the whole break.
+        #
+        # Not when input isn't blocked, though. Then this same loop is
+        # actively harmful: it would drag a window she is allowed to leave
+        # back over whatever she switched to, once a second, for the whole
+        # break — unmissable *and* inescapable, which is the one combination
+        # worse than either. A reminder has to be leaveable.
+        if not self._suppressing:
+            return
         for window in self._windows:
             window.attributes("-topmost", True)
             window.lift()
@@ -398,6 +441,8 @@ class LockOverlay:
         if self._suppressor is not None:
             self._suppressor.stop()
             self._suppressor = None
+        self._cancel_local_hold()
+        self._suppressing = False
         for window in self._windows:
             window.destroy()
         self._windows = []
@@ -405,6 +450,7 @@ class LockOverlay:
         self._hints = []
         self._bodies = []
         self._menus = []
+        self._notices = []
         self._menu_open = False
 
     # -- internals ----------------------------------------------------
@@ -471,10 +517,125 @@ class LockOverlay:
                 font=("Segoe UI", pt(10)), bg=self.BG, fg=self.FAINT,
             ).place(relx=0.5, rely=0.94, anchor="center")
 
+        # Filled in only when input turns out not to be blocked, so the
+        # screen never claims to be enforcing something it isn't.
+        notice = tk.Label(
+            window, text="", font=("Segoe UI", pt(11)),
+            bg=self.BG, fg=self.MUTED,
+        )
+        notice.place(relx=0.5, rely=0.06, anchor="center")
+        self._notices.append(notice)
+
+        self._bind_local_keys(window)
         window.update_idletasks()
         window.lift()
         window.focus_force()
         return window, countdown, body
+
+    # -- keys without a global hook ------------------------------------
+
+    #: tkinter keysym -> the name pynput reports. Only the keys the lock
+    #: actually answers to need an entry.
+    _KEYSYMS = {"Escape": "esc"}
+
+    def _bind_local_keys(self, window: tk.Toplevel) -> None:
+        """Route this window's own key events into the same queue.
+
+        A permission-free path to every lock-screen gesture, and the reason
+        a lock that failed to suppress input is still usable rather than a
+        trap: without it, a macOS session that was refused Accessibility
+        permission gets a borderless always-on-top window on every screen,
+        no title bar, `WM_DELETE_WINDOW` refused, and no key handling — for
+        the full fifteen minutes of a long break.
+
+        It is **self-selecting**, which is why it is installed
+        unconditionally rather than only when suppression is known to have
+        failed. While suppression is live the keystroke is swallowed before
+        any window sees it, so these bindings are inert on a working lock;
+        they come into play only when nothing is being suppressed. That
+        matters because the *interesting* failure is the silent one — a hook
+        that starts cleanly and then receives nothing — which no return
+        value from `start()` can detect. Self-selection covers it without
+        having to.
+
+        Everything is posted to `_pending` in pynput's own shape, so the
+        skip menu, the media key and the walk key all behave identically
+        through either path with no second implementation to keep in step.
+        """
+        window.bind("<KeyPress>", self._local_key_press)
+        window.bind("<KeyRelease>", self._local_key_release)
+
+    def _local_key_press(self, event) -> None:
+        char, name = self._translate(event)
+        if name == "esc":
+            self._start_local_hold()
+        self._pending.put(("key", char, name))
+
+    def _local_key_release(self, event) -> None:
+        char, name = self._translate(event)
+        if name == "esc":
+            self._cancel_local_hold()
+        self._pending.put(("keyup", char, name))
+
+    @classmethod
+    def _translate(cls, event) -> tuple[str | None, str | None]:
+        """A tkinter event as the (char, name) pair the queue expects."""
+        # None rather than "" for a key with no text, matching what pynput
+        # reports — the queue is drained by one code path for both.
+        char = getattr(event, "char", "") or ""
+        return (char if char and char.isprintable() else None), cls._KEYSYMS.get(
+            getattr(event, "keysym", "")
+        )
+
+    def _start_local_hold(self) -> None:
+        """Time an Escape hold on tkinter's clock.
+
+        Started once and then left alone: Escape auto-repeats hard — 606
+        events across one measured 60-second lock — so restarting the timer
+        on each repeat would push the deadline past the end of the break.
+        Mirrors the global path, which learned this the same way.
+        """
+        if not self._config.safety_unlock or self._local_hold is not None:
+            return
+        if self._root is None:      # stubbed in tests
+            return
+        self._local_hold = self._root.after(
+            int(self._config.safety_unlock_hold * 1000), self._local_hold_fired
+        )
+
+    def _local_hold_fired(self) -> None:
+        self._local_hold = None
+        self._pending.put(("hold", None, None))
+
+    def _cancel_local_hold(self) -> None:
+        if self._local_hold is None:
+            return
+        try:
+            self._root.after_cancel(self._local_hold)
+        except Exception:   # pragma: no cover - a dead job must not raise
+            pass
+        self._local_hold = None
+
+    def _admit_reminder_only(self) -> None:
+        """Say on screen that this break is not being enforced.
+
+        Silence here would be the dishonest option: an identical-looking
+        lock that happens not to block anything teaches her the app is
+        broken rather than that the permission is missing.
+        """
+        release = (
+            f"hold Esc {self._config.safety_unlock_hold:.0f}s"
+            if self._config.safety_unlock
+            else "click away"
+        )
+        for notice in self._notices:
+            try:
+                notice.configure(
+                    text=f"reminder only — input is not blocked  ·  "
+                         f"{release} to dismiss"
+                )
+            except tk.TclError:   # pragma: no cover - window already gone
+                continue
 
     # -- the skip menu (SPEC §4B) -------------------------------------
 

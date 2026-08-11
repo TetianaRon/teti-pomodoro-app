@@ -13,7 +13,11 @@ tzdata>=2024.1
 # when something is genuinely playing. Not cosmetic: the media key is a
 # toggle, and firing it into silence would START playback on every quiet
 # break. Pulls in comtypes. Phase 8 will need PyInstaller hooks for both.
-pycaw>=20240210
+#
+# Marked win32-only: it depends on comtypes, so without the marker the very
+# first `pip install -r requirements.txt` on a Mac fails here — a wall of
+# red on step one, before anything has had a chance to work.
+pycaw>=20240210; sys_platform == "win32"
 
 # Calendar access needs no OAuth after all — the work calendar is reachable
 # as a secret iCal URL carrying free/busy data, which is a plain HTTPS fetch
