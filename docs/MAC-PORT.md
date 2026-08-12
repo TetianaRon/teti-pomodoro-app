@@ -12,7 +12,8 @@ to stop when something looks wrong rather than pressing on.
 **It has to be Claude Code specifically**, not claude.ai in a browser and not
 Cowork. The difference is not the model, it is the hands: this job means
 reading the files in this folder, editing them, running the tests and running
-the app — none of which a chat window can reach. Step 0 covers getting it.
+the app — none of which a chat window can reach. Step 0 covers finding it — if you have the Claude desktop app, you may
+already have it.
 
 **What Claude needs from you:** point it at this file first. Everything it
 should know about the port is here or linked from here, including the things
@@ -26,23 +27,31 @@ rediscovering them.
 Both involve asking someone else, so start them together and let the answers
 come back while you do the rest.
 
-### 0a. Get Claude Code on your Mac
+### 0a. Find Claude Code (you may already have it)
 
-Three ways in, easiest first:
+**If you have the Claude desktop app, Claude Code is probably already in it.**
+Anthropic's page says *"Max, Pro, Team, and Enterprise users can access Claude
+Code on the Claude desktop app"* — so open the app and look for Claude Code.
+On a work account that is the likely case, and there is nothing to install.
 
-| | |
-| --- | --- |
-| **Desktop app** — recommended | Download it from [claude.com/claude-code](https://claude.com/claude-code) and sign in. Nothing else to install. |
-| **VS Code** | Install VS Code, then the Claude Code extension from its marketplace. Worth it if you would like to see the files as they change. |
-| **Terminal** | `npm install -g @anthropic-ai/claude-code`, then run `claude`. Needs Node installed; skip unless you already have it. |
+If it is not there, any of these gets you the same thing — same Claude, same
+abilities:
 
-Any of them is fine — same Claude, same abilities. Sign in with your work
-account.
+- **Download it** from [claude.com/claude-code](https://claude.com/claude-code).
+- **In VS Code**: install VS Code, then the Claude Code extension from its
+  marketplace. Worth it if you would like to watch the files change.
+- **In Terminal**, if you would rather:
+
+  ```sh
+  curl -fsSL https://claude.ai/install.sh | bash
+  ```
+
+  then run `claude`.
 
 **If it says Claude Code is not available on your account**, that is an admin
-setting rather than anything you did. Ask whoever manages your Claude seat to
-enable it — and ask at the same time as the question below, so you are not
-waiting twice.
+setting rather than anything you did — on Team and Enterprise plans it can be
+switched off for a workspace. Ask whoever manages your Claude seat to enable
+it, at the same time as the question below, so you are not waiting twice.
 
 ### 0b. Ask about Accessibility permission
 
