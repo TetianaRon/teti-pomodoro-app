@@ -567,6 +567,21 @@ Decisions, each settled by putting it on screen and looking:
   pressure rather than information. The warning does tick seconds, because
   that is the one moment urgency is the point.
 
+**It gets out of the way, and it was never in the way.** Clicks already passed
+through it — the window carries `WS_EX_TRANSPARENT`, so Windows' own hit test
+at the pill's centre returns whatever is underneath, and it takes no focus and
+stays out of Alt+Tab. What it could still do is *hide* something you were
+reaching for, so it now fades to near-invisible as the cursor approaches and
+returns when it leaves, exactly as the warning has always done. It starts
+fading a little before the cursor arrives rather than on contact: the pill is
+30px in a corner, so "on it" is a small target, and clearing as you reach reads
+as getting out of the way instead of reacting to being touched.
+
+Polled on its own clock rather than bound to `<Enter>`/`<Leave>`, for the same
+reason the warning polls: a click-through window receives no mouse events at
+all. On the app's one-second tick instead, it would take up to a second to
+clear, which would be worse than not moving.
+
 The countdown is **optional** (`show_countdown`, a settings checkbox): some
 days a number in the corner of your eye is what you want and some days it is
 not. The warning is **not** optional — that is the app doing its job, and

@@ -27,6 +27,8 @@ from __future__ import annotations
 import sys
 import tkinter as tk
 
+from .config import DEFAULT, Config
+
 #: Plate colours, by what the time means.
 TONES = {
     "work": (18, 22, 28),        # minutes until the next break
@@ -236,6 +238,7 @@ class PillWindow:
         self._label: tk.Label | None = None
         self._photo = None          # tkinter will not keep a reference
         self._geometry: tuple | None = None
+        self._alpha: float | None = None
 
     @property
     def visible(self) -> bool:
@@ -247,12 +250,24 @@ class PillWindow:
     #: getting out of the way of the cursor, not for decoration.
     RESTING_ALPHA = 1.0
 
+    @property
+    def rect(self) -> tuple | None:
+        """(left, top, width, height), or None if not on screen."""
+        if self._geometry is None:
+            return None
+        width, height, x, y = self._geometry
+        return (x, y, width, height)
+
     def show(self, image, x: int, y: int, alpha: float = RESTING_ALPHA) -> None:
         """Put `image` on screen at (x, y), creating the window if needed."""
         from PIL import ImageTk
 
         if self._window is None:
             self._build(alpha)
+        # Applied on every call, not only at build. It used to be honoured
+        # once, so a caller that recomputed the alpha per frame — the
+        # warning does — silently got whatever the first frame had.
+        self.set_alpha(alpha)
         self._photo = ImageTk.PhotoImage(image)
         self._label.configure(image=self._photo)
         # Recorded whether or not tk is asked, because `raise_above` asserts
@@ -298,10 +313,11 @@ class PillWindow:
             pass
 
     def set_alpha(self, alpha: float) -> None:
-        if self._window is None:
+        if self._window is None or alpha == self._alpha:
             return
         try:
             self._window.attributes("-alpha", alpha)
+            self._alpha = alpha
         except tk.TclError:     # pragma: no cover
             pass
 
@@ -315,6 +331,7 @@ class PillWindow:
         self._label = None
         self._photo = None
         self._geometry = None
+        self._alpha = None
 
     # -- internals ----------------------------------------------------
 
@@ -328,6 +345,7 @@ class PillWindow:
             # window layered, which the key depends on.
             window.attributes("-alpha", alpha)
             window.attributes("-transparentcolor", KEY)
+            self._alpha = alpha
         except tk.TclError:     # pragma: no cover - not Windows
             pass    # a rectangular pill, rather than none
         label = tk.Label(window, bd=0, highlightthickness=0, bg=KEY)
@@ -452,10 +470,19 @@ class CountdownPill:
 
     HEIGHT = 30
 
-    def __init__(self, root: tk.Tk) -> None:
+    #: Fade a little before the cursor arrives rather than exactly on it. The
+    #: pill is 30px in a corner, so "on it" is a small target, and starting
+    #: to clear as you reach feels like getting out of the way instead of
+    #: reacting to being touched.
+    HOVER_MARGIN = 10
+
+    def __init__(self, root: tk.Tk, config: Config = DEFAULT) -> None:
         self._root = root
+        self._config = config
         self._window = PillWindow(root)
         self._shown: tuple | None = None
+        self._hovering = False
+        self._poll_job: str | None = None
 
     @property
     def visible(self) -> bool:
@@ -470,14 +497,77 @@ class CountdownPill:
             image = render(text, tone, self.HEIGHT)
             area = work_area(self._root)
             x, y = corner(area, image.width, image.height)
-            self._window.show(image, x, y)
+            self._window.show(image, x, y, alpha=self._alpha())
             # Every tick, not only on a change: the shell puts its own
             # windows above ours whenever the taskbar is clicked.
             self._window.raise_above()
             self._shown = (text, tone)
+            self._schedule_poll()
         except Exception:   # pragma: no cover - a chip must not break a break
             self.hide()
 
     def hide(self) -> None:
+        self._cancel_poll()
         self._window.hide()
         self._shown = None
+        self._hovering = False
+
+    # -- getting out of the way ----------------------------------------
+    #
+    # Clicks already pass through — the window carries WS_EX_TRANSPARENT, so
+    # Windows' own hit test at its centre returns whatever is underneath. The
+    # pill can still *hide* something you are reaching for, though, which is
+    # what fading is for. Polled rather than bound to <Enter>/<Leave>,
+    # because a click-through window receives no mouse events at all: the
+    # same reason the warning has always polled.
+
+    def _alpha(self) -> float:
+        return (
+            self._config.banner_alpha_hover if self._hovering
+            else self._config.banner_alpha
+        )
+
+    def _schedule_poll(self) -> None:
+        """Poll on its own clock, not the app's one-second tick.
+
+        Waiting up to a second to clear out of the way would be worse than
+        not moving at all.
+        """
+        if self._poll_job is not None or self._root is None:
+            return
+        self._poll_job = self._root.after(
+            int(self._config.banner_hover_poll * 1000), self._poll_hover
+        )
+
+    def _cancel_poll(self) -> None:
+        if self._poll_job is None:
+            return
+        try:
+            self._root.after_cancel(self._poll_job)
+        except Exception:   # pragma: no cover - a dead job is fine
+            pass
+        self._poll_job = None
+
+    def _poll_hover(self) -> None:
+        self._poll_job = None
+        if not self.visible:
+            return
+        try:
+            over = self.near_cursor(self._root.winfo_pointerxy())
+        except tk.TclError:     # pragma: no cover - teardown race
+            return
+        if over != self._hovering:
+            self._hovering = over
+            self._window.set_alpha(self._alpha())
+        self._schedule_poll()
+
+    def near_cursor(self, cursor: tuple) -> bool:
+        """Whether the cursor is on or just outside the pill."""
+        rect = self._window.rect
+        if rect is None:
+            return False
+        x, y = cursor
+        left, top, width, height = rect
+        margin = self.HOVER_MARGIN
+        return (left - margin <= x < left + width + margin
+                and top - margin <= y < top + height + margin)

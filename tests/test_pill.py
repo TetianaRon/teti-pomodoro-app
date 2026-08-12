@@ -218,19 +218,25 @@ class Stub:
     """CountdownPill with the window replaced, to read its decisions."""
 
     def __init__(self):
-        self.pill = CountdownPill(root=None)
+        self.pill = CountdownPill(root=None, config=Config())
         self.shown: list = []
         self.hidden = 0
+        self.alpha: float | None = None
         outer = self
 
         class Window:
-            visible = False
+            visible = True
+            rect: tuple | None = None
 
             def show(self, image, x, y, alpha=1.0):
                 outer.shown.append((image.width, image.height, x, y))
+                outer.alpha = alpha
 
             def raise_above(self):
                 pass
+
+            def set_alpha(self, alpha):
+                outer.alpha = alpha
 
             def hide(self):
                 outer.hidden += 1
@@ -262,6 +268,123 @@ def test_otherwise_it_is_drawn_in_the_corner(monkeypatch):
     assert height == CountdownPill.HEIGHT
     area = work_area(None)
     assert (x, y) == corner(area, width, height)
+
+
+# -- getting out of the way --------------------------------------------
+
+
+def test_it_fades_when_the_cursor_arrives_and_returns_when_it_leaves():
+    stub = Stub()
+    stub.pill.update("5 min", "work")
+    stub.pill._window.rect = (1800, 990, 78, 30)
+    config = stub.pill._config
+
+    stub.pill._root = _cursor_at(1839, 1005)        # over it
+    stub.pill._poll_hover()
+    assert stub.alpha == config.banner_alpha_hover
+
+    stub.pill._root = _cursor_at(200, 200)          # away again
+    stub.pill._poll_hover()
+    assert stub.alpha == config.banner_alpha
+
+
+def test_it_starts_fading_just_before_the_cursor_reaches_it():
+    """The pill is 30px in a corner, so "exactly on it" is a small target;
+    clearing as you reach reads as getting out of the way."""
+    stub = Stub()
+    stub.pill._window.rect = (1800, 990, 78, 30)
+    margin = stub.pill.HOVER_MARGIN
+
+    assert stub.pill.near_cursor((1839, 1005)) is True
+    assert stub.pill.near_cursor((1800 - margin + 2, 1005)) is True
+    assert stub.pill.near_cursor((1800 - margin - 20, 1005)) is False
+
+
+def test_nothing_on_screen_is_never_hovered():
+    stub = Stub()
+    stub.pill._window.rect = None
+    assert stub.pill.near_cursor((0, 0)) is False
+
+
+def test_hiding_stops_the_hover_poll():
+    """Otherwise the callback outlives the window it was watching."""
+    stub = Stub()
+    stub.pill._poll_job = "job1"
+    stub.pill._root = _cursor_at(0, 0)
+    stub.pill.hide()
+    assert stub.pill._poll_job is None
+    assert stub.pill._hovering is False
+
+
+def test_the_alpha_is_only_pushed_to_windows_when_it_changes():
+    """Set every poll — eight times a second — it would be pure churn."""
+    from pomodoro_guardian.pill import PillWindow
+
+    window = PillWindow.__new__(PillWindow)
+    window._window = _FakeToplevel()
+    window._alpha = None
+
+    window.set_alpha(1.0)
+    window.set_alpha(1.0)
+    window.set_alpha(0.15)
+
+    assert window._window.alphas == [1.0, 0.15]
+
+
+# -- clicks pass straight through --------------------------------------
+
+
+def test_the_window_is_built_click_through_and_focusless(monkeypatch):
+    """Measured on the live window too: Windows' hit test at the pill's
+    centre returns something that is not ours."""
+    import win32con
+    import win32gui
+
+    from pomodoro_guardian.pill import PillWindow
+
+    applied = {}
+    monkeypatch.setattr(win32gui, "GetParent", lambda _h: 0)
+    monkeypatch.setattr(win32gui, "GetWindowLong", lambda _h, _i: 0)
+    monkeypatch.setattr(
+        win32gui, "SetWindowLong",
+        lambda _h, _index, style: applied.setdefault("style", style),
+    )
+
+    PillWindow._make_inert(_FakeToplevel())
+
+    style = applied["style"]
+    assert style & win32con.WS_EX_TRANSPARENT, "clicks would not pass through"
+    assert style & win32con.WS_EX_NOACTIVATE, "the pill could steal focus"
+    assert style & win32con.WS_EX_TOOLWINDOW, "the pill would be in Alt+Tab"
+
+
+class _FakeToplevel:
+    def __init__(self) -> None:
+        self.alphas: list[float] = []
+
+    def winfo_id(self) -> int:
+        return 1234
+
+    def attributes(self, name, value=None):
+        if name == "-alpha" and value is not None:
+            self.alphas.append(value)
+
+
+def _cursor_at(x: int, y: int):
+    class Root:
+        @staticmethod
+        def winfo_pointerxy():
+            return (x, y)
+
+        @staticmethod
+        def after(_ms, _func):
+            return "job"
+
+        @staticmethod
+        def after_cancel(_job):
+            pass
+
+    return Root()
 
 
 # -- shell windows are not full-screen apps ----------------------------

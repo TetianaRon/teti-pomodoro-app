@@ -133,7 +133,7 @@ class Application:
             on_stop_walk=self._stop_walk,
         )
         self.banner = WarningBanner(self._root, config)
-        self.pill = CountdownPill(self._root)
+        self.pill = CountdownPill(self._root, config)
         self.tray_status = tray.TrayStatus()
         self.tray = tray.TrayIcon(self.tray_status)
         self.summary_window = summary.SummaryWindow(self._root)
