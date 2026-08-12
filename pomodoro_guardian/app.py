@@ -679,8 +679,20 @@ class Application:
         self.monitor.start()
         if self.watcher is not None:
             self.watcher.start()
-        if not self.dry_run and self.tray.start():
-            self._log("tray icon ready — click it for walking, settings, quit")
+        if not self.dry_run:
+            if self.tray.start():
+                self._log(
+                    "tray icon ready — click it for walking, settings, quit"
+                )
+            else:
+                # Said out loud, with what it costs. A tray that simply never
+                # appears is indistinguishable from a broken app, and the
+                # menu is the only way to start a walk or quit.
+                self._log(f"no tray icon: {self.tray.reason}")
+                self._log(
+                    "  so no walk toggle, no settings and no Quit — "
+                    "stop the app with Ctrl+C"
+                )
         # Start and stop are recorded so a gap in the log can be told from
         # a crash: a start with no matching stop is the app dying.
         self.history.record(history_module.APP_STARTED)

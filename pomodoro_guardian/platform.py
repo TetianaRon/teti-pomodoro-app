@@ -179,17 +179,19 @@ def _probe_sounds() -> tuple[bool, str]:
 
 
 def _probe_tray() -> tuple[bool, str]:
+    from .tray import backend_unavailable
+
+    # Asked of the same function the app uses, so --doctor cannot promise a
+    # menu the app will then refuse to show — and so the reason is worded
+    # once.
+    refused = backend_unavailable()
+    if refused:
+        return False, refused
     try:
         import pystray
     except ImportError:
-        return False, "no menu: no walk toggle, no settings, no quit"
-    backend = getattr(pystray.Icon, "__module__", "unknown")
-    if MACOS:
-        # pystray's Cocoa backend wants the main thread, and tkinter already
-        # has it. This is a design decision for the port, not a missing call.
-        return False, f"installed ({backend}), but its macOS backend needs " \
-                      f"the main thread"
-    return True, f"menu available ({backend})"
+        return False, "pystray is not installed"
+    return True, f"menu available ({getattr(pystray.Icon, '__module__', '?')})"
 
 
 def _probe_autostart() -> tuple[bool, str]:

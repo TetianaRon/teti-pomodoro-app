@@ -44,7 +44,7 @@ working, the 25/5 rhythm, the long break every 4th cycle, the daily work cap,
 the walking tally, the calendar meeting skip, the history log, the settings
 window — plus reminder mode, and the record of which breaks were actually
 taken rather than worked through, and time on calls counting towards the daily
-cap. Roughly 3,000 lines and **all 410 automated tests**. Nothing here needs
+cap. Roughly 3,000 lines and **all 416 automated tests**. Nothing here needs
 porting.
 
 **The hands — these touch the operating system.** Blocking input, covering
@@ -107,7 +107,7 @@ automatically — that's expected, not an error.
 .venv/bin/python -m pytest tests
 ```
 
-**You should see 410 passing.** This is the moment worth having early: it
+**You should see 416 passing.** This is the moment worth having early: it
 means every rule about breaks, caps, walking and history is intact on your
 machine, and anything that goes wrong from here is in the OS-facing parts
 only.
@@ -211,6 +211,25 @@ seconds. Watch a full cycle, then four in a row to see the long break. Drop
 hold the keyboard.
 
 ### Stage 4 — The menu bar, and calls
+
+**The app refuses to start a menu bar icon on macOS, on purpose.** It would
+otherwise try to run pystray's Cocoa backend on a background thread, and AppKit
+refuses that at a level below Python — it can kill the process outright rather
+than raise an error anything could catch. That would have hit you at the worst
+moment: the first launch that is not `--dry-run`, which is exactly when you are
+testing the break screen for the first time.
+
+So instead you will see this at startup, and the app carries on:
+
+```
+no tray icon: the macOS menu bar has to run on the main thread, which
+tkinter already owns — see docs/MAC-PORT.md, stage 4
+  so no walk toggle, no settings and no Quit — stop the app with Ctrl+C
+```
+
+That is expected until this stage is done. The guard is one line —
+`MAIN_THREAD_ONLY` at the top of `tray.py` — so when you have a menu bar that
+works, remove `"darwin"` from it.
 
 **The menu bar is a real design decision, not a translation.** The Windows
 version uses `pystray` on a background thread. On macOS that library needs

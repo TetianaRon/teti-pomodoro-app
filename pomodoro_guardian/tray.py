@@ -17,7 +17,23 @@ tray is a lost convenience; it must not stop breaks being enforced.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
+
+#: Platforms whose tray backend cannot be run from a background thread.
+#:
+#: pystray's Cocoa backend drives AppKit, and AppKit refuses to be used off
+#: the main thread — at the Objective-C level, where it can take the whole
+#: process down rather than raise anything Python could catch. `_run`
+#: catching `Exception` is therefore no protection at all.
+#:
+#: tkinter already owns the main thread here, so there is nowhere safe left
+#: to put it: that collision is a design decision for the macOS port rather
+#: than a call to translate (docs/MAC-PORT.md, stage 4). Until it is made,
+#: refusing to start is the honest outcome — the alternative is the app
+#: dying without a message at the exact moment the break screen is first
+#: being tested.
+MAIN_THREAD_ONLY = {"darwin"}
 
 # Actions posted to the queue and handled by the app.
 START_WALK = "start_walk"
@@ -82,6 +98,21 @@ def render_icon(walking: bool = False, size: int = 64):
     return image.resize((size, size), Image.LANCZOS)
 
 
+def backend_unavailable() -> str:
+    """Why a tray icon cannot be shown here, or "" if one can.
+
+    Asked before pystray is imported, because on the platforms named in
+    `MAIN_THREAD_ONLY` the damage is done by starting the backend, not by
+    importing it.
+    """
+    if sys.platform in MAIN_THREAD_ONLY:
+        return (
+            "the macOS menu bar has to run on the main thread, which tkinter "
+            "already owns — see docs/MAC-PORT.md, stage 4"
+        )
+    return ""
+
+
 def _left_click_icon(pystray):
     """pystray's Icon, but opening the menu on a left click too.
 
@@ -134,27 +165,46 @@ class TrayIcon:
         self._icon = None
         self._thread: threading.Thread | None = None
         self._available = False
+        #: Why there is no tray, when there isn't one. Empty while it works.
+        self.reason = ""
         #: What the icon currently shows, so it is only redrawn on a change.
         self._drawn: bool | None = None
 
     # -- lifecycle ----------------------------------------------------
 
     def start(self) -> bool:
-        """Show the icon. Returns False if the tray isn't available."""
+        """Show the icon. Returns False if the tray isn't available.
+
+        Sets `reason` when it declines, so the caller can say why out loud.
+        A tray that silently fails to appear is indistinguishable from a
+        broken app, which is the whole problem this guards against.
+        """
+        self.reason = backend_unavailable()
+        if self.reason:
+            return False
         try:
             import pystray
         except ImportError:
+            self.reason = "pystray is not installed"
             return False
 
-        icon_class = _left_click_icon(pystray)
-        self._icon = icon_class(
-            "Pomodoro Guardian",
-            icon=self._image(self.status.walking),
-            title="Pomodoro Guardian",
-            menu=self._menu(pystray),
-        )
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        # Building the icon and its menu is not obviously safe either — the
+        # backend is chosen at import and constructs platform objects here —
+        # so the whole approach is guarded, not just the import.
+        try:
+            icon_class = _left_click_icon(pystray)
+            self._icon = icon_class(
+                "Pomodoro Guardian",
+                icon=self._image(self.status.walking),
+                title="Pomodoro Guardian",
+                menu=self._menu(pystray),
+            )
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+        except Exception as exc:    # pragma: no cover - backend-dependent
+            self.reason = f"the tray backend would not start ({exc})"
+            self._icon = None
+            return False
         self._available = True
         return True
 

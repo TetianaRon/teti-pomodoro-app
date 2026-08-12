@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 410 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 416 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 410 tests
+.venv\Scripts\python.exe -m pytest tests                 # 416 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -163,6 +163,41 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-11 — the tray would have killed the app on her first real launch
+
+Found while answering "what will she need to do?", by reading the startup
+path rather than trusting that it degrades. Most of it does: the
+single-instance guard, the Start Menu shortcut and the log redirect all
+no-op correctly off Windows. **The tray does not.**
+
+`pystray` imports fine on macOS and its Cocoa backend then runs on a
+*background thread*, which AppKit refuses at the Objective-C level — where it
+can take the process down instead of raising anything Python can catch, so
+`_run`'s `except Exception` is no protection at all. tkinter already owns the
+main thread, so there is nowhere safe to put it; that collision is the design
+decision stage 4 of the handover describes.
+
+The timing is what made it worth fixing before sending anything: it lands on
+the first launch that is *not* `--dry-run` — precisely when she would be
+testing the break screen for the first time, on a machine nobody has ever run
+this on. An unexplained death there is the worst possible first impression.
+
+`tray.start()` now refuses on macOS before pystray is even imported (the
+import is harmless; starting the backend is what kills it), sets a `reason`,
+and the app prints it along with what it costs — no walk toggle, no settings,
+no Quit, stop with Ctrl+C. `--doctor` asks the same function, so it cannot
+promise a menu the app will then refuse. Building the icon and menu is
+guarded too, not just the import: the backend is chosen at import time and
+constructs platform objects in the constructor.
+
+The guard is one line — `MAIN_THREAD_ONLY` at the top of `tray.py` — and the
+handover says to remove `"darwin"` from it once a real menu bar works.
+
+**Verified:** 416 tests (6 new), pyflakes clean, and the launch simulated with
+`sys.platform` set to darwin — refusal confirmed, pystray provably never
+touched (it was replaced with something that raises), and the exact log lines
+she will see printed out.
 
 ### 2026-08-11 — the countdown became a corner pill, and the warning became the same pill
 
