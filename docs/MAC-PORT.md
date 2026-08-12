@@ -168,8 +168,25 @@ for a minute and you should see `work session started`.
 Both small and both safe.
 
 - **Chimes**: `afplay <file>` in place of the Windows call in `sounds.py`.
-  Then drop a couple of short sound files into `assets/sound-effects/` —
-  they aren't included, deliberately (see `ATTRIBUTION.md`).
+
+  Then you need the sound files. **They are deliberately not in the
+  package** — they're free Pixabay clips whose licence allows any use but
+  not redistributing the files themselves, so everyone downloads their own
+  (`ATTRIBUTION.md` has the reasoning). It takes two minutes: open any of
+  these, press the download button, and drop the file into
+  `assets/sound-effects/`.
+
+  - [Bell Notification](https://pixabay.com/sound-effects/bell-notification-337658/)
+  - [Notification Bell Sound 1](https://pixabay.com/sound-effects/notification-bell-sound-1-376885/)
+  - [Bell chord1](https://pixabay.com/sound-effects/bell-chord1-83260/)
+  - [bell sound](https://pixabay.com/sound-effects/bell-sound-370341/)
+  - [Bell Ring](https://pixabay.com/sound-effects/bell-ring-123742/)
+
+  Two is enough — one for a break starting, one for it ending. Anything
+  short works; these are just the ones already in use on the Windows side.
+  Pick them in Settings, or run `--test-sounds` to hear what you have. The
+  app treats an empty folder as normal and stays silent, so this is never
+  a blocker.
 - **Start at login**: a LaunchAgent file, replacing the Windows shortcut in
   `runtime.py`. Worth doing early: an app you have to remember to start is
   the habit this thing exists to replace.
