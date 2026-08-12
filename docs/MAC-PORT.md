@@ -4,10 +4,15 @@ This app was built and used on Windows. Most of it is plain Python that runs
 anywhere; a handful of pieces talk to Windows directly and need a macOS
 equivalent written. This document is the plan for doing that.
 
-**Who this is for:** whoever is setting it up on a Mac, working with Claude
-Code on that machine. You do not need to be able to write Python. You do need
+**Who this is for:** whoever is setting it up on a Mac, working with **Claude
+Code** on that machine. You do not need to be able to write Python. You do need
 to be able to open Terminal, paste commands, and read what comes back — and
 to stop when something looks wrong rather than pressing on.
+
+**It has to be Claude Code specifically**, not claude.ai in a browser and not
+Cowork. The difference is not the model, it is the hands: this job means
+reading the files in this folder, editing them, running the tests and running
+the app — none of which a chat window can reach. Step 0 covers getting it.
 
 **What Claude needs from you:** point it at this file first. Everything it
 should know about the port is here or linked from here, including the things
@@ -16,7 +21,30 @@ rediscovering them.
 
 ---
 
-## 0. Do this before anything else (10 minutes)
+## 0. Two things to sort out first
+
+Both involve asking someone else, so start them together and let the answers
+come back while you do the rest.
+
+### 0a. Get Claude Code on your Mac
+
+Three ways in, easiest first:
+
+| | |
+| --- | --- |
+| **Desktop app** — recommended | Download it from [claude.com/claude-code](https://claude.com/claude-code) and sign in. Nothing else to install. |
+| **VS Code** | Install VS Code, then the Claude Code extension from its marketplace. Worth it if you would like to see the files as they change. |
+| **Terminal** | `npm install -g @anthropic-ai/claude-code`, then run `claude`. Needs Node installed; skip unless you already have it. |
+
+Any of them is fine — same Claude, same abilities. Sign in with your work
+account.
+
+**If it says Claude Code is not available on your account**, that is an admin
+setting rather than anything you did. Ask whoever manages your Claude seat to
+enable it — and ask at the same time as the question below, so you are not
+waiting twice.
+
+### 0b. Ask about Accessibility permission
 
 The app's whole point is a break you cannot click away from. Blocking the
 keyboard and mouse on macOS needs **Accessibility permission**, granted by
@@ -32,6 +60,8 @@ myself?"**
 
 This is the same wall a packaged `.exe` build hit on the Windows machine, so
 it's a normal thing to run into, not a sign anything is wrong.
+
+Neither answer blocks steps 1–3, so carry on while you wait.
 
 ---
 
@@ -89,6 +119,15 @@ folder name genuinely do not matter**; the app works out where it lives.
 
 Then `cd` into it. The easiest way: type `cd ` (with the space), drag the
 folder from Finder onto the Terminal window, and press Return.
+
+**Now point Claude Code at that folder** — it works on one project folder at a
+time, and this is the one. Then give it its first instruction:
+
+> Read docs/MAC-PORT.md. That's the plan for porting this Windows app to
+> macOS. Start with stage 1.
+
+Everything it needs to know is in here or linked from here, including what has
+already been tried and failed, so it should not need to go exploring.
 
 ### Install what it needs
 
