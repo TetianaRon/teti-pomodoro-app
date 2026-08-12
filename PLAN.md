@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 402 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 404 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 402 tests
+.venv\Scripts\python.exe -m pytest tests                 # 404 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -99,6 +99,14 @@ afterwards.
   cover for a hook that starts cleanly and then receives nothing — which no
   return value can detect. Making it conditional restores a full-screen window
   with no way out.
+- **Adding a test will fail the suite until you update two documents. That is
+  deliberate.** `tests/test_docs_current.py` checks that the count quoted in
+  `docs/MAC-PORT.md` and this file matches what pytest actually collects. The
+  figure is load-bearing: it appears at step 5 of the macOS setup as "you
+  should see N passing", so a stale number tells a non-developer her machine
+  is broken. It went stale three times in two days before this existed. The
+  failure message names the new number; put it in both files. Running a single
+  test file skips the check, so it never gets in the way while working.
 - **Never call tkinter from a non-UI thread.** pynput listeners and pystray
   both run on their own threads and post to a queue the tick drains.
   `root.after()` from a listener raises "main thread is not in main loop".
