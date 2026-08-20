@@ -11,6 +11,71 @@ Newest first.
 
 ## Open
 
+### 2026-08-20 — A Python point-upgrade silently killed the venv and every shortcut
+The app would not start, and the only symptom was a `Python Launcher is
+sorry to say ...` dialog reporting no Python at
+`...\Python\Python312\pythonw.exe`. Nothing about it looked like this
+app, so it reads as a Windows problem rather than a Pomodoro Guardian one.
+
+**Cause.** Python 3.12 was replaced by 3.13 on 2026-08-18, leaving
+`...\Programs\Python\Python312\` an empty shell — the 3.12.10 install from
+the 2026-08-09 entry above. A venv's `pythonw.exe` is only a shim that
+hands off to the base interpreter recorded in `pyvenv.cfg`, so the whole
+`.venv` died with it, and with it all three launchers: Desktop, Start Menu,
+and Startup all target `.venv\Scripts\pythonw.exe`.
+
+**Two things worth remembering about the symptom.** The failing process
+stays alive holding that modal open — it sat there for 80 minutes before
+anyone looked — so Task Manager shows a live `pythonw.exe` running
+`-m pomodoro_guardian` while the app is in fact not running at all. And
+because the shortcuts point at a path *inside* the repo, nothing in git
+changes when this breaks; the repo looks perfectly healthy.
+
+**Fixed by rebuilding, not by code.** Recreated `.venv` on 3.13.15 and
+reinstalled `requirements.txt` — all clean 3.13 wheels, no build-from-source,
+though `pywin32` jumped 306-era to 312. The shortcuts needed no edit, since
+the rebuilt venv sits at the same path. Verified: 427 tests, pyflakes clean,
+`zoneinfo` resolving `America/Toronto`.
+
+**Second finding: `requirements.txt` does not list the dev tools.** The
+rebuild silently lost `pytest` and `pyflakes`, both of which PLAN.md treats
+as the standing verify step. They were reinstalled by hand. Anyone rebuilding
+the venv from `requirements.txt` alone gets an environment that cannot run
+the project's own checks, and `pyflakes` in particular was added to the
+toolchain to hunt a specific bug class — losing it loses that guard quietly.
+Worth either a `requirements-dev.txt` or a note in the README setup section
+that the 2026-08-09 entry already asked for.
+
+**Not automated:** nothing warns that an interpreter upgrade has orphaned
+the venv. The next point-upgrade (3.14) reproduces this exactly. A cheap
+guard would be for the launcher to check `pyvenv.cfg`'s `home` still exists
+and say so in plain language, rather than leaving the Python Launcher to
+explain it.
+
+### 2026-08-12 — Walk prompt fought the break lock; a break left Ctrl stuck down
+Reported from live use: a break arrived mid-walk, and three things went
+wrong. The walk prompt flashed through the break screen; `W` on the lock
+would not stop the walk; and after the break the browser zoomed on wheel
+scroll instead of scrolling — a stuck Ctrl — until a log-out/in cleared it.
+
+**Two causes, both fixed in code.**
+- The walk prompt (`walking.WalkPrompt`) was left up during a break.
+  It and the lock overlay each reassert always-on-top every tick, so they
+  fought for the front (the flashing); and the prompt is a focusable
+  always-on-top window, so it kept stealing the focus the lock's local `W`
+  binding needs, which is why the walk could not be stopped from the lock.
+  `Application._update_walking` now takes the prompt down while the lock is
+  visible and restores it afterwards (see `test_walk_prompt_during_break.py`).
+- A suppressing keyboard hook swallows a modifier's key-*up* as well as its
+  key-down, so a Ctrl combo pressed during the break left Ctrl held at the
+  OS level after unlock. `InputSuppressor.stop()` now synthesises key-ups
+  for the modifier keys, but only when it was actually suppressing.
+
+**Not yet verified on real hardware:** the modifier-release path is
+Windows-only and this session's test run could exercise only its guard
+logic, not the actual `keybd_event` calls. Worth confirming on the machine
+that a Ctrl-combo held during a break no longer sticks afterwards.
+
 ### 2026-08-10 — A dev run wrote into the live history log
 Verifying the cycle-resume work meant building a real `Application` against
 a scratch `state.json`. It picked up the scratch state as instructed and
