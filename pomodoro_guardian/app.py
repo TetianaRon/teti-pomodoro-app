@@ -169,6 +169,9 @@ class Application:
             on_start=self._start_walk,
             on_stop=self._stop_walk,
         )
+        # Set while the walk prompt is held down for the duration of a break
+        # lock, so it can be brought back afterwards if it was up before.
+        self._walk_prompt_hidden_for_break = False
 
     # -- custom skip (SPEC §4B) ---------------------------------------
 
@@ -283,6 +286,16 @@ class Application:
         prompt and the tray are both unreachable behind a lock.
         """
         return self._state.walking, self._state.walked_including_current()
+
+    def _walk_goal_met(self) -> bool:
+        """Whether today's walking target is already reached.
+
+        Measured from the in-progress total, so a walk that crosses the line
+        counts the moment it does. A target of zero — no goal set — reads as
+        met, which is the right answer: there is nothing to remind about.
+        """
+        target = self.settings.walking_target_minutes * 60
+        return self._state.walked_including_current() >= target
 
     def _start_walk(self) -> None:
         self._state = self._state.start_walk()
@@ -544,9 +557,35 @@ class Application:
         self.tray.refresh()
 
     def _update_walking(self) -> None:
-        """Prompt at the configured times, and keep the window current."""
+        """Prompt at the configured times, and keep the window current.
+
+        While a break lock is up the prompt is taken down entirely. Left
+        visible it fights the lock for the front once a second — it and the
+        lock both reassert always-on-top every tick — which is the flashing
+        seen through a break; and being a focusable always-on-top window it
+        can steal the very focus the lock needs for its own W-to-stop key,
+        so the walk cannot be stopped from behind the lock either. The lock
+        screen's W hint is the in-break control instead. The prompt comes
+        back after the break if it was up before it — driven off the lock's
+        visibility rather than a break event, so it is restored the same way
+        whether the break ended, was skipped, or was released by hand.
+
+        A reminder is only raised while a walk is still owed: once the day's
+        target is reached the prompt is pure noise, so a due reminder is
+        consumed silently, and a prompt held down for a break is not brought
+        back if the goal was met in the meantime.
+        """
         if self.dry_run:
             return
+        if self.overlay.visible:
+            if self.walk_prompt.visible:
+                self._walk_prompt_hidden_for_break = True
+                self.walk_prompt.hide()
+            return
+        if self._walk_prompt_hidden_for_break:
+            self._walk_prompt_hidden_for_break = False
+            if not self._walk_goal_met():
+                self.walk_prompt.show("Time to walk")
         now = datetime.now().time()
         due = walking.due_prompt(
             now,
@@ -554,10 +593,15 @@ class Application:
             self._state.walk_prompts_done,
         )
         if due is not None:
+            # Consumed either way — the reminder asks once — but only shown
+            # while the day's walking is not already done.
             self._state = self._state.with_prompt_shown(due)
             self._save_state()
-            self._log(f"walking reminder ({due})")
-            self.walk_prompt.show("Time to walk")
+            if self._walk_goal_met():
+                self._log(f"walking reminder ({due}) skipped — daily goal met")
+            else:
+                self._log(f"walking reminder ({due})")
+                self.walk_prompt.show("Time to walk")
 
         if self.walk_prompt.visible:
             self.walk_prompt.update(

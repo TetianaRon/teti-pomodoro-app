@@ -93,17 +93,19 @@ override and this would be automatic and daily.
 Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
-**State: all 8 phases complete and in daily use.** 441 tests, pyflakes clean,
-working tree clean, `teti-laptop` pushed and tracking `origin/teti-laptop`
-(9 commits ahead of `origin/main`, which hasn't moved since this branch's
-merge-base — no PR opened yet, that's a separate step if/when wanted). The
-app runs from a Startup shortcut at login; there is no build step. No skill
-is required to work on this project — see `CLAUDE.md`'s session practices.
+**State: all 8 phases complete and in daily use.** 452 tests, pyflakes clean,
+working tree clean. `teti-laptop`'s 9 commits (checkpoints 1–2 of this batch,
+the Pixabay sound-pack fetch, and the Inno Setup installer) are merged into
+`main` and pushed; this branch adds the walk-prompt-vs-break-lock fix
+(2026-08-12, see Session Worklog) on top, rebased onto that merged `main`.
+The app runs from a Startup shortcut at login; there is no build step. No
+skill is required to work on this project — see `CLAUDE.md`'s session
+practices.
 
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 441 tests
+.venv\Scripts\python.exe -m pytest tests                 # 452 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -135,11 +137,24 @@ numbers are all still guesses: 12h cap, 50 min walking, 25/5, 11:45/15:20
 reminders, 90s input gap, 1.4s banner hold.
 
 ### Unverified on hardware
-The lock screen's **`M` (media) and `W` (stop treadmill timer)** keys share one
-key-routing path and neither has run for real. `local/checkmedia.py` exercises
-`M`; start a walk from the tray first and one lock covers both. `M` also lifts
-keyboard suppression for a few milliseconds — the script reports whether it
-came back intact, which is the failure that would matter.
+Two things run only on the machine, never in the suite:
+
+1. **The lock's `M` (media) and `W` (stop treadmill timer) keys** share one
+   key-routing path and neither has run for real. `local/checkmedia.py`
+   exercises `M`; start a walk from the tray first and one lock covers both.
+   `M` also lifts keyboard suppression for a few milliseconds — the script
+   reports whether it came back intact, which is the failure that would
+   matter. `W` is now the *sole* in-break walk control — the walk prompt is
+   hidden while the lock is up (2026-08-12) — and the live report that drove
+   that fix was `W` doing nothing behind the lock, so a real break taken
+   mid-walk followed by `W` is the direct confirmation the fix landed.
+2. **The stuck-modifier release on unlock** (2026-08-12, Windows-only): a
+   suppressing hook can swallow a modifier's key-up, leaving Ctrl held after
+   the break so the browser zooms on scroll until a re-login.
+   `InputSuppressor.stop()` now force-releases Ctrl/Alt/Shift/Win, but only
+   its guard logic is tested. To confirm: during a locked break hold a
+   Ctrl-combo (e.g. Ctrl+W), let the break end, then scroll a browser — it
+   should scroll, not zoom.
 
 **Also unverified (2026-08-22):** the meeting/skip redesign — a break
 bleeding into a real meeting reads as free-to-skip, and a break already due
@@ -429,6 +444,48 @@ the first. **Not verified on hardware**: the free/complete skip menu text
 and the post-meeting delay haven't been watched against a real calendar
 feed and a real lock screen yet — flagged the same way the existing `M`/`W`
 key handling already is in the Handoff section above.
+
+### 2026-08-12 — walk prompt vs. break lock, stuck modifiers, conditional reminder
+
+Live use surfaced three linked symptoms during a break taken mid-walk: the
+walk prompt flashed through the break, `W` on the lock would not stop the
+walk, and after the break Ctrl was stuck down — the browser zoomed on wheel
+scroll instead of scrolling — until a log-out/in.
+
+- **Walk prompt (symptoms 1 & 2).** `_update_walking` left the prompt up
+  during a break. The prompt and the lock each reassert always-on-top every
+  tick, so they fought for the front once a second (the flashing); and the
+  prompt is a focusable always-on-top window, so whenever it won that race
+  it took the focus the lock's local `W` key needs — leaving no way to stop
+  the walk from behind the lock. Fixed by taking the prompt down while
+  `overlay.visible` and restoring it afterwards, driven off lock visibility
+  rather than a break event, so it returns whether the break ended, was
+  skipped, or was released by hand. The lock's `W` hint is the in-break
+  control, as it was always meant to be.
+- **Stuck modifiers (symptom 3).** A suppressing keyboard hook swallows a
+  modifier's key-up as readily as its key-down, so a Ctrl combo pressed
+  during a break (a reflexive Ctrl+W, a reach for Ctrl+Alt+Del) left Ctrl
+  "down" at the OS level after the lock came off. `InputSuppressor.stop()`
+  now synthesises key-ups for every modifier (Shift/Ctrl/Alt/Win, L+R), but
+  only when it was actually suppressing — nothing to clear otherwise.
+
+Then, on the same session, a small behaviour change to the walk reminder:
+
+- **Conditional reminder.** The scheduled walk prompt now only pops up while
+  the day's target is still owed — a reminder to walk when the quota is
+  already met is pure noise. `_update_walking` checks `_walk_goal_met` (the
+  in-progress tally against `walking_target_minutes`) at the due moment; a
+  reminder past the goal is consumed silently rather than shown, so it still
+  asks once and resets with the day. The same guard governs the restore of a
+  prompt held down for a break — it does not come back if the goal was met
+  in the meantime.
+
+**Verified:** 427 tests (11 new in `tests/test_walk_prompt_during_break.py`),
+pyflakes clean. The modifier-release path itself is Windows-only and could
+not be exercised on this run's platform beyond its guard logic; worth a
+real-hardware check that a Ctrl-combo during a break no longer sticks.
+**Fixes logged in `ISSUES.md`** (the reminder change is a behaviour tweak,
+not a bug, so it lives here rather than there).
 
 ### 2026-08-11 — the tray would have killed the app on her first real launch
 

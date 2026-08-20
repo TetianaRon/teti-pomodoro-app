@@ -83,7 +83,7 @@ working, the 25/5 rhythm, the long break every 4th cycle, the daily work cap,
 the walking tally, the calendar meeting skip, the history log, the settings
 window — plus reminder mode, and the record of which breaks were actually
 taken rather than worked through, and time on calls counting towards the daily
-cap. Roughly 3,000 lines and **all 441 automated tests**. Nothing here needs
+cap. Roughly 3,000 lines and **all 452 automated tests**. Nothing here needs
 porting.
 
 **The hands — these touch the operating system.** Blocking input, covering
@@ -155,7 +155,7 @@ automatically — that's expected, not an error.
 .venv/bin/python -m pytest tests
 ```
 
-**You should see 441 passing.** This is the moment worth having early: it
+**You should see 452 passing.** This is the moment worth having early: it
 means every rule about breaks, caps, walking and history is intact on your
 machine, and anything that goes wrong from here is in the OS-facing parts
 only.
@@ -250,7 +250,10 @@ Two parts, and they're independent:
 2. **Blocking input.** Needs the Accessibility permission from step 0. macOS
    will prompt you the first time; if it doesn't, add the app by hand under
    **System Settings → Privacy & Security → Accessibility** (and check
-   **Input Monitoring** too).
+   **Input Monitoring** too). One thing to carry across when you wire this
+   up: **releasing the block has to clear any modifier key left stuck down** —
+   see §7. The Windows fix for it is a no-op on macOS, so this is real port
+   work, not something that comes for free.
 
 **Do part 1 first and stop there for a while.** Add `--remind-only` and you
 have the whole break screen with no permission involved and nothing that can
@@ -411,6 +414,18 @@ Hard-won on the Windows side. `docs/SPEC.md` has the full accounts.
 - **Never call the window code from a background thread.** Input listeners
   and the menu bar both run on their own threads; they post messages that the
   main loop picks up. This is not optional tidiness — it raises outright.
+- **A suppressing input hook can leave a modifier key stuck down.** Blocking
+  the keyboard swallows a modifier's key-*up* as readily as its key-down, so
+  a Ctrl combo pressed during a break — a reflexive Ctrl+W, a reach for the
+  force-quit chord — left Ctrl held at the OS level *after* the lock came
+  off. The symptom outlived the app: the browser read the phantom Ctrl and
+  zoomed on scroll instead of scrolling, and only logging out cleared it.
+  `InputSuppressor.stop()` fixes it by synthesising a key-up for every
+  modifier as the block ends — but through `keybd_event`, so
+  `_release_stuck_modifiers()` is **Windows-only and a no-op on macOS**.
+  Whatever you use to suppress input on a Mac, expect the same stuck-modifier
+  effect on release and add the equivalent there, or a break will hand the
+  machine back with a modifier still down. (found in live use, 2026-08-12)
 - **The calendar is free/busy only.** Every event says `Busy`, nothing more.
   Every calendar rule has to work from time ranges alone. (`docs/SPEC.md` §9)
 - **A day off is detected by a busy block of 6 hours or more.** Measured

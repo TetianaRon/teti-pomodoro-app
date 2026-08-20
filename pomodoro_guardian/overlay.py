@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -168,6 +169,7 @@ class InputSuppressor:
             timer, self._escape_timer = self._escape_timer, None
         if timer is not None:
             timer.cancel()
+        was_suppressing = bool(self._listeners)
         for listener in self._listeners:
             try:
                 listener.stop()
@@ -175,6 +177,45 @@ class InputSuppressor:
                 pass
         self._listeners = []
         self._escape_down_at = None
+        # Only when we were actually suppressing — otherwise there is no
+        # stuck state to clear, and firing phantom key-ups into a machine we
+        # never hooked would be its own small surprise.
+        if was_suppressing:
+            self._release_stuck_modifiers()
+
+    @staticmethod
+    def _release_stuck_modifiers() -> None:
+        """Force every modifier key up once suppression comes down.
+
+        A suppressing keyboard hook swallows the key-*up* of a modifier
+        pressed during a break as readily as the key-down — a reflexive
+        Ctrl+W, or a hand reaching for Ctrl+Alt+Del. Windows' async key
+        state is then left with Ctrl (or Alt, or Shift) still held, and the
+        symptom outlives the app: the browser reads the phantom Ctrl and
+        turns wheel-scroll into zoom, with only a re-login to clear it.
+
+        Synthesising a key-up for each modifier when the lock ends resets
+        that state. Releasing a key that is already up is a no-op, so this
+        is safe to fire unconditionally on the way out.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        keyeventf_keyup = 0x0002
+        modifiers = (
+            0x10, 0x11, 0x12,      # generic Shift, Ctrl, Alt
+            0xA0, 0xA1,            # left/right Shift
+            0xA2, 0xA3,            # left/right Ctrl
+            0xA4, 0xA5,            # left/right Alt
+            0x5B, 0x5C,            # left/right Windows
+        )
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            for vk in modifiers:
+                user32.keybd_event(vk, 0, keyeventf_keyup, 0)
+        except (OSError, AttributeError):  # pragma: no cover - defensive
+            pass
 
     @property
     def active(self) -> bool:
