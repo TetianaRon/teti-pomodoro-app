@@ -57,6 +57,18 @@ class Config:
     # almost half the time.
     overtime_warning_lead: float = 1 * MINUTE
     emergency_grant_hours: float = 1.0
+    # Overwork breaks are a fixed length regardless of where the cycle
+    # count would otherwise put a short or long break — meant to read as
+    # "wrap up," not as an ordinary break.
+    overtime_break_duration: float = 10 * MINUTE
+    # Once the cap is already reached, a skip is not the ordinary 60-min
+    # budget at 5/10/20 min: it's 5-minute-only, capped at 15 min/day
+    # total. An unrestricted skip during overtime just extends the work
+    # day another hour, defeating the point of having reached the cap at
+    # all. Separate from custom_skip_daily_budget/custom_skip_options,
+    # which stop applying once overtime starts.
+    overtime_skip_options: tuple[float, ...] = (5 * MINUTE,)
+    overtime_skip_daily_budget: float = 15 * MINUTE
 
     # --- Custom break skip (SPEC §4B) ---
     # Fixed choices, offered by the hold-Escape menu against the lock. All

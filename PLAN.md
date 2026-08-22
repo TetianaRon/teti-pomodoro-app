@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-### In progress: a 9-item feedback batch, checkpoint 1 of 4 done
+### In progress: a 9-item feedback batch, checkpoint 2 of 4 done
 
 Tetiana filed 9 feedback items in one sitting (2026-08-22) covering the
 meeting/timer/skip interaction, overwork behaviour, a daily-cap warning, and
@@ -36,39 +36,26 @@ via the new `PomodoroEngine.complete_break()`, instead of restarting the long
 break via `defer_break()`. **Not yet watched against a real calendar feed and
 lock screen** — see "Unverified on hardware" below.
 
-**Checkpoint 2 — overwork/Emergency-Mode skip rules — next, not started.**
-Two asks, from the original feedback, not yet re-derived from anything —
-this is the plan as scoped before the session that would have built it was
-interrupted:
-- Once the day is over its effective cap (`self._cap.over` in `app.py`,
-  already what flips `self.engine.overtime` in `_update_cap()`), custom
-  skips should offer **only a 5-minute option**, with a **15-minute total
-  daily cap** — separate from the ordinary `custom_skip_daily_budget` (60
-  min). Rationale (contributor's own words): unrestricted skips during
-  overtime just extend the work day another hour, defeating the point of
-  the cap having been reached at all.
-- **All overwork breaks should be a fixed 10 minutes**, regardless of
-  whether the cycle would otherwise have been short or long — meant to read
-  as "wrap up," not as an ordinary break.
-- What's already in place to build on: `Config.overtime_work_duration` (5
-  min) and `Config.overtime_warning_lead` (1 min) already shorten the work
-  interval past the cap; `Config.emergency_grant_hours` (1h) and
-  `app.py`'s `_emergency_option()`/`_take_emergency` (not yet read this
-  session — start there) handle Emergency Mode itself. `caps.py`'s
-  `CapStatus` is pure and already read this session (`.over`,
-  `.overtime_seconds`, `.effective_seconds` — no changes anticipated there).
-  What's missing: `timer.py`'s `_break_duration()` only branches on
-  `_break_is_long`, with no awareness of `self.overtime` — it will need a
-  third case. The skip budget split will likely mean a second
-  `AppState` field (parallel to `custom_skip_used`) and a second
-  options/budget branch in checkpoint 1's `_skip_offer()`/`_take_skip()` in
-  `app.py`, keyed on `self._cap.over` (or `self.engine.overtime`) rather
-  than the ordinary budget — independent of checkpoint 1's `free`/`complete`
-  logic, which should keep applying during overtime too (a meeting is still
-  a meeting). `state.py` and `app.py`'s emergency-mode section have not
-  been read yet — do that before designing the split.
+**Checkpoint 2 — overwork/Emergency-Mode skip rules — done, see the
+"2026-08-22" Session Worklog entry below (second one) and `docs/SPEC.md` §5,
+§4B.** Covered: `timer.py`'s `_break_duration()` now returns a fixed
+`Config.overtime_break_duration` (10 min) whenever `self.overtime` is set,
+regardless of `_break_is_long`; a new, separate `AppState.overtime_skip_used`
+budget (`Config.overtime_skip_daily_budget`, 15 min) with its own
+`overtime_skip_remaining`/`can_skip_overtime`/`with_overtime_skip` gives
+overtime skips a 5-minute-only menu (`Config.overtime_skip_options`) instead
+of the ordinary 5/10/20 at 60 min/day; `app.py`'s `_skip_offer()`/
+`_take_skip()` branch on `self.engine.overtime` to pick which
+options/budget/state-method apply, independent of checkpoint 1's
+`free`/`complete` rules, which still apply on top either way (a meeting is
+still a meeting during overtime). **Not verified against the app.py wiring
+on hardware** — the new state-machine and budget behaviour is engine/state
+tested, but `_skip_offer()`/`_take_skip()`'s branching itself was not pulled
+into a testable free function the way checkpoint 1's `skip_terms()` was, so
+it has no direct test coverage; only a live lock screen past the daily cap
+would exercise it.
 
-**Checkpoint 3 — 10-minute pre-daily-cap warning — not started.** Mirror the
+**Checkpoint 3 — 10-minute pre-daily-cap warning — next, not started.** Mirror the
 existing 2-minute break warning (`Config.warning_lead`, the `WarningBanner`/
 `CountdownPill` pair in `pill.py`) but keyed off `CapStatus.remaining_seconds`
 reaching 10 minutes instead of off the work interval. In that final 10-minute
@@ -106,7 +93,7 @@ override and this would be automatic and daily.
 Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
-**State: all 8 phases complete and in daily use.** 428 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 435 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -114,7 +101,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 428 tests
+.venv\Scripts\python.exe -m pytest tests                 # 435 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -157,6 +144,13 @@ bleeding into a real meeting reads as free-to-skip, and a break already due
 waits `post_meeting_break_delay` after the call ends rather than firing
 instantly. Both are engine-level tested but have not been watched against a
 real calendar feed and a real lock screen yet.
+
+**Also unverified (2026-08-22, checkpoint 2):** the overwork skip menu
+actually showing 5-minute-only options once the daily cap is reached, its
+"over the cap" note text, and a real overwork break actually locking for the
+fixed 10 minutes rather than the ordinary short/long duration — all engine-
+and state-level tested, none watched on a real lock screen at end of a long
+day yet.
 
 ### Two habits that account for most bugs found
 1. **Assert on the rendered result, not the requested one.** Geometry checks
@@ -258,6 +252,65 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-22 — overwork skips got their own tiny budget, and overwork breaks stopped varying in length
+
+Second of the four checkpoints in the 2026-08-22 feedback batch (checkpoint
+2 of 4 — see the Handoff section above). Both asks share one premise:
+overtime is supposed to feel different from an ordinary day, and two paths
+still behaved identically to the ordinary rhythm even after the day's cap
+was reached.
+
+**Custom skips during overtime now offer only a 5-minute option, capped at
+15 minutes total for the day** — a new, separate `AppState.overtime_skip_used`
+budget (`Config.overtime_skip_daily_budget`), entirely apart from the
+ordinary 60-min `custom_skip_used` pool. Rationale, in the contributor's own
+words: an unrestricted skip once the cap is already reached just extends the
+work day another hour, defeating the point of having reached the cap at all.
+`app.py`'s `_skip_offer()`/`_take_skip()` now branch on `self.engine.overtime`
+to pick which options/budget/state-method apply — `Config.overtime_skip_options`
+and `Config.overtime_skip_daily_budget` in place of the ordinary
+`custom_skip_options`/`custom_skip_daily_budget`. This sits *underneath*
+checkpoint 1's `free`/`complete` rules rather than replacing them: a break
+bleeding into a meeting, or one already rested through, is still free
+regardless of whether the day is over its cap — a meeting is still a
+meeting during overtime, and there's nothing to charge for a break already
+taken.
+
+**Every overwork break is now a fixed 10 minutes**, short or long cycle
+alike. `timer.py`'s `_break_duration()` only ever branched on
+`_break_is_long`; it now checks `self.overtime` first and returns the new
+`Config.overtime_break_duration` unconditionally when set, meant to read as
+"wrap up" rather than as an ordinary break of whatever length the cycle
+count would otherwise have produced.
+
+**What this built on, confirming the handoff's read of the code:**
+`Config.overtime_work_duration`/`overtime_warning_lead` already shortened
+the work interval past the cap, and `caps.py`'s `CapStatus.over` (mirrored
+onto `self.engine.overtime` every tick in `app.py`'s `_update_cap()`) was
+already the right signal to key off — no changes needed in `caps.py`.
+`app.py`'s Emergency Mode section (`_emergency_option`/`_take_emergency`)
+turned out to be untouched by this checkpoint: it operates on a separate
+weekly-hours budget and is offered by the same skip menu, but doesn't
+interact with which *skip durations* are on offer.
+
+**Declared, not silently folded in:** `_skip_offer()`/`_take_skip()`'s
+branching logic was not extracted into a standalone testable function the
+way checkpoint 1 pulled `skip_terms()` out of `Application` — the new
+per-budget behaviour is fully covered at the `timer.py`/`state.py` level
+(fixed break length, the new budget's independence from the ordinary one,
+its own rollover), but the app.py wiring that picks between them is glue
+code with no direct test, matching how `_emergency_option`/`_take_emergency`
+were already untested this way. `--doctor` gained a second budget line
+(`overtime skip left today`) for symmetry with the existing one.
+
+**Verified:** 435 tests (7 new — `tests/test_timer.py` gained
+`test_overtime_shortens_the_work_interval` (this codepath, `engine.overtime`
+shortening `work_duration()`, previously had no direct test at all) and two
+fixed-break-length cases; `tests/test_skips.py` and
+`tests/test_state_budgets.py` gained the overtime-budget independence,
+exhaustion and rollover/round-trip cases), pyflakes clean. **Not verified on
+hardware** — see "Unverified on hardware" above.
 
 ### 2026-08-22 — the timer stopped freezing during meetings, and skips stopped restarting the long break
 

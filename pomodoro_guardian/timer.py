@@ -498,6 +498,11 @@ class PomodoroEngine:
         return max(0.0, self.work_duration() - self.warning_lead())
 
     def _break_duration(self) -> float:
+        # Past the cap every break is the same fixed length, short or long
+        # cycle alike — it's meant to read as "wrap up," not as an ordinary
+        # break (SPEC §5).
+        if self.overtime:
+            return self.config.overtime_break_duration
         return (
             self.config.long_break_duration
             if self._break_is_long

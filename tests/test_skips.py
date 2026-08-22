@@ -292,6 +292,46 @@ def test_a_malformed_tally_reads_as_zero(tmp_path, bad):
     assert load(path, today=date(2026, 8, 10)).custom_skip_used == 0
 
 
+# -- the separate overtime skip budget (SPEC §5) -----------------------
+
+
+def test_the_overtime_budget_starts_whole_and_shrinks_as_it_is_spent():
+    budget = 15 * MINUTE
+    state = DailyState.for_today()
+
+    assert state.overtime_skip_remaining(budget) == budget
+    spent = state.with_overtime_skip(5 * MINUTE)
+    assert spent.overtime_skip_remaining(budget) == 10 * MINUTE
+
+
+def test_the_overtime_budget_is_exhausted_well_short_of_the_ordinary_one():
+    """15 min/day total — three 5-minute skips, not the ordinary 60."""
+    budget = 15 * MINUTE
+    state = DailyState.for_today()
+    for _ in range(3):
+        state = state.with_overtime_skip(5 * MINUTE)
+
+    assert state.overtime_skip_remaining(budget) == 0
+    assert not state.can_skip_overtime(5 * MINUTE, budget)
+
+
+def test_the_two_skip_budgets_are_independent():
+    """Overtime spending must not touch the ordinary 60-min budget or
+    vice versa — they are separate pools (SPEC §5)."""
+    state = DailyState.for_today().with_skip(20 * MINUTE)
+    state = state.with_overtime_skip(5 * MINUTE)
+
+    assert state.skip_remaining(60 * MINUTE) == 40 * MINUTE
+    assert state.overtime_skip_remaining(15 * MINUTE) == 10 * MINUTE
+
+
+def test_the_overtime_budget_rolls_over_on_a_new_day():
+    yesterday = DailyState(date(2026, 8, 9), overtime_skip_used=15 * MINUTE)
+    today = yesterday.rolled_to(date(2026, 8, 10))
+
+    assert today.overtime_skip_used == 0
+
+
 # -- deferring a break ------------------------------------------------
 
 

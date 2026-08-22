@@ -186,26 +186,53 @@ class Application:
         )
 
     def _skip_offer(self) -> SkipOffer:
-        """What the hold-Escape menu should show right now."""
-        budget = self.config.custom_skip_daily_budget
+        """What the hold-Escape menu should show right now.
+
+        Once the day is over its cap, the ordinary 5/10/20-min menu and its
+        60-min budget give way to a separate, much smaller one — 5-minute
+        skips only, 15 min/day total (SPEC §5): an unrestricted skip during
+        overtime would just extend the work day another hour, defeating the
+        point of having reached the cap at all. The free/complete rules
+        (a meeting bleeding into the break, or having already rested through
+        it) still apply on top either way — a meeting is still a meeting
+        during overtime.
+        """
+        over = self.engine.overtime
+        skip_options = (
+            self.config.overtime_skip_options if over
+            else self.config.custom_skip_options
+        )
+        budget = (
+            self.config.overtime_skip_daily_budget if over
+            else self.config.custom_skip_daily_budget
+        )
+        can_skip = (
+            self._state.can_skip_overtime if over else self._state.can_skip
+        )
+        remaining = (
+            self._state.overtime_skip_remaining(budget) if over
+            else self._state.skip_remaining(budget)
+        )
         free, complete = self._skip_terms()
         options = tuple(
             SkipOption(
                 seconds=seconds,
                 label=f"{seconds / 60:.0f} min",
-                enabled=free or self._state.can_skip(seconds, budget),
+                enabled=free or can_skip(seconds, budget),
             )
-            for seconds in self.config.custom_skip_options
+            for seconds in skip_options
         )
         if complete:
             note = "free — already rested, counts as taken"
         elif free:
             note = "free — meeting"
+        elif over:
+            note = "over the cap — 5 min skips only"
         else:
             note = self._cap.describe() if self._cap else ""
         return SkipOffer(
             options,
-            self._state.skip_remaining(budget),
+            remaining,
             emergency=self._emergency_option(),
             note=note,
         )
@@ -719,16 +746,30 @@ class Application:
             )
             return
 
+        # Over the cap, the same skip debits the separate, much smaller
+        # overtime budget instead of the ordinary one (SPEC §5).
+        over = self.engine.overtime
+        budget = (
+            self.config.overtime_skip_daily_budget if over
+            else self.config.custom_skip_daily_budget
+        )
         if not free:
-            self._state = self._state.with_skip(seconds)
+            self._state = (
+                self._state.with_overtime_skip(seconds) if over
+                else self._state.with_skip(seconds)
+            )
             self._save_state()
         self.overlay.release()
         self.engine.defer_break(seconds, time.monotonic())
-        left = self._state.skip_remaining(self.config.custom_skip_daily_budget)
+        left = (
+            self._state.overtime_skip_remaining(budget) if over
+            else self._state.skip_remaining(budget)
+        )
         reason = " (free — meeting)" if free else ""
+        kind = "overtime " if over else ""
         self._log(
             f"break skipped for {seconds / 60:.0f} min{reason} "
-            f"({left / 60:.0f} min of budget left today)"
+            f"({left / 60:.0f} min of {kind}budget left today)"
         )
         self.history.record(
             history_module.BREAK_SKIPPED, seconds=seconds,
@@ -1181,6 +1222,10 @@ def report_exclusions(
     state = state_module.load(state_module.state_path(settings_file))
     left = state.skip_remaining(config.custom_skip_daily_budget) / 60
     print(f"\n  custom skip left today: {left:.0f} min")
+    overtime_left = (
+        state.overtime_skip_remaining(config.overtime_skip_daily_budget) / 60
+    )
+    print(f"  overtime skip left today: {overtime_left:.0f} min (5 min only)")
     return 0
 
 

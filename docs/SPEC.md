@@ -314,6 +314,19 @@ interruption — the break keeps running if you don't reach for it.
 **B. Custom skip — capped.**
 A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 minutes. All custom skips share one **60-minutes-per-day accumulated cap**. Once the daily 60 minutes are used, no more custom skips are available that day — the lock enforces normally.
 
+**Once the day is over its cap, this budget and menu are replaced by a much
+smaller one (added 2026-08-22).** The ordinary 5/10/20-minute choice and
+60-min/day budget give way to **5-minute-only skips, capped at 15
+minutes/day total** — a separate `AppState.overtime_skip_used` pool,
+entirely apart from the ordinary one, so overtime spending never eats into
+tomorrow's ordinary budget and vice versa. Rationale (contributor's own
+words): an unrestricted skip once the cap is already reached just extends
+the work day another hour, defeating the point of having reached the cap at
+all. This sits underneath the free/complete rules below, not in place of
+them — a break bleeding into a meeting, or one already rested through, is
+still free during overtime; a meeting is still a meeting regardless of
+whether the day is over its cap.
+
 **Invocation — hold Escape for 3 seconds (decided 2026-08-09).** Phase 1's
 safety release becomes this gesture rather than being replaced by it: holding
 Escape against the lock stops being a plain unlock and instead opens a small
@@ -500,6 +513,7 @@ Rules:
 
 - **Effective cap:** the base cap, adjusted live by the walking shortfall described in §7 — see the formula there. This is the actual number of work-minutes the app will allow to start on a given day.
 - Once the effective cap is hit, the app stops starting new work sessions from activity — you're done for the day as far as the app is concerned (unless Emergency Mode is used).
+- **What "done for the day" actually does, mechanically:** rather than switching the app off outright — which would mean no further breaks either, the least protection exactly when you're most tired — the work interval shortens sharply (`Config.overtime_work_duration`, 5 min) so breaks become a standing nudge to stop. **Every one of those overwork breaks is a fixed `Config.overtime_break_duration` (10 min, added 2026-08-22)**, short or long cycle alike — meant to read as "wrap up," not as an ordinary break of whatever length the cycle count would otherwise have produced. And the custom skip menu itself shrinks — see §4B's overtime skip budget, above.
 - **Emergency Mode:** the only way past the effective cap. Each activation grants **+1 hour**, stacking on top of whatever the effective cap is at that moment — forced breaks continue as normal during that extra hour; Emergency Mode is not a break-skip mechanism. Capped at **3 hours total per week** (so at most three activations, or any split adding up to 3h, per rolling week). No calendar or advance-scheduling requirement — a direct override, kept rare by the weekly cap rather than gated by a delay. If a genuinely extreme situation exceeds this budget, the intentional escape hatch is closing the app entirely — a deliberate act, not a casual one.
 
 ## 6. Focus Mode (deep-work override)

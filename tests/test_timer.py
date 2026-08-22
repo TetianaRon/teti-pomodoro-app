@@ -258,3 +258,48 @@ def test_scaled_config_preserves_the_shape_of_the_cycle():
     h = Harness(config)
     h.advance_until(Event.BREAK_STARTED, limit=200)
     assert h.state is State.BREAK
+
+
+# -- past the daily cap (SPEC §5) --------------------------------------
+
+
+def test_overtime_shortens_the_work_interval():
+    h = Harness()
+    h.engine.overtime = True
+    assert h.engine.work_duration() == h.config.overtime_work_duration
+
+
+def test_overtime_breaks_are_a_fixed_length_regardless_of_the_cycle():
+    """Reported feedback (2026-08-22): overwork breaks should read as 'wrap
+    up', not as an ordinary short or long break — so once overtime is set,
+    every break is the same fixed length whichever cycle it would otherwise
+    have landed on."""
+    h = Harness(Config(long_break_every=4))
+    h.engine.overtime = True
+
+    started = h.advance_until(Event.BREAK_STARTED, limit=2000)
+    assert not h.engine.snapshot().is_long_break, "still an ordinary cycle"
+    ended = h.advance_until(
+        Event.BREAK_ENDED,
+        limit=h.config.overtime_break_duration + 10,
+        active=False,
+    )
+    assert ended - started == pytest.approx(
+        h.config.overtime_break_duration, abs=2.0
+    )
+
+
+def test_overtime_breaks_are_fixed_length_even_on_the_long_cycle():
+    h = Harness(Config(long_break_every=1))
+    h.engine.overtime = True
+
+    started = h.advance_until(Event.BREAK_STARTED, limit=2000)
+    assert h.engine.snapshot().is_long_break, "the cycle count still says long"
+    ended = h.advance_until(
+        Event.BREAK_ENDED,
+        limit=h.config.overtime_break_duration + 10,
+        active=False,
+    )
+    assert ended - started == pytest.approx(
+        h.config.overtime_break_duration, abs=2.0
+    ), "overtime's fixed length must win over the ordinary long-break duration"
