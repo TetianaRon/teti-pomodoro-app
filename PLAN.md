@@ -94,9 +94,9 @@ Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
 **State: all 8 phases complete and in daily use.** 441 tests, pyflakes clean,
-working tree clean on `teti-laptop` — **7 commits ahead of `origin/main` and
-not pushed** (`teti-laptop` has no upstream configured; `origin` only has
-`main`, sitting at this branch's merge-base with nothing added since). The
+working tree clean, `teti-laptop` pushed and tracking `origin/teti-laptop`
+(8 commits ahead of `origin/main`, which hasn't moved since this branch's
+merge-base — no PR opened yet, that's a separate step if/when wanted). The
 app runs from a Startup shortcut at login; there is no build step. No skill
 is required to work on this project — see `CLAUDE.md`'s session practices.
 
