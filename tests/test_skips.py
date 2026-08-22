@@ -11,11 +11,13 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from pomodoro_guardian.app import skip_terms
 from pomodoro_guardian.calendar_feed import BusyBlock, Schedule
 from pomodoro_guardian.calendar_watch import CalendarWatcher
 from pomodoro_guardian.config import MINUTE, Config
 from pomodoro_guardian.exclusions import (
     CombinedDetector,
+    Exclusion,
     FakeDetector,
     MeetingDetector,
     NullDetector,
@@ -371,3 +373,88 @@ def test_deferring_longer_than_the_interval_is_clamped():
     h.engine.defer_break(99 * MINUTE, h.now)
 
     assert h.engine.snapshot().remaining <= h.config.work_duration + 1
+
+
+# -- completing a break by skipping it, once rested (SPEC §4B) --------
+
+
+def test_completing_a_break_advances_the_cycle():
+    """Unlike defer_break: this IS taking the break, just cut short."""
+    h = Harness()
+    h.advance_until(Event.BREAK_STARTED, limit=2000)
+    assert h.engine.completed_cycles == 0
+
+    h.engine.complete_break(h.now)
+
+    assert h.engine.completed_cycles == 1
+
+
+def test_completing_a_break_resumes_on_a_full_fresh_interval():
+    h = Harness()
+    h.advance_until(Event.BREAK_STARTED, limit=2000)
+
+    h.engine.complete_break(h.now)
+
+    assert h.engine.state is State.WORK
+    assert h.engine.snapshot().remaining == pytest.approx(
+        h.config.work_duration, abs=1.0
+    )
+
+
+def test_completing_a_long_break_does_not_re_offer_a_long_break():
+    """The reported bug (2026-08-22): skipping a mostly-rested long break
+    used to leave the cycle count stuck, so the *next* break computed as
+    long again too — completing it must advance the count like a natural
+    end does, so the following break is an ordinary short one.
+    """
+    h = Harness(Config(long_break_every=4))
+    for _ in range(3):
+        h.advance_until(Event.BREAK_STARTED, limit=2000)
+        h.advance_until(Event.BREAK_ENDED, limit=h.config.short_break_duration + 30)
+
+    h.advance_until(Event.BREAK_STARTED, limit=2000)
+    assert h.engine.snapshot().is_long_break, "the 4th break should be long"
+
+    h.engine.complete_break(h.now)
+    h.advance_until(Event.BREAK_STARTED, limit=2000)
+
+    assert not h.engine.snapshot().is_long_break
+
+
+# -- free and complete skip terms (SPEC §4B, app.py's skip_terms) -----
+
+
+def test_an_ordinary_skip_is_neither_free_nor_complete():
+    free, complete = skip_terms(Exclusion(), break_elapsed=30.0, complete_after=5 * MINUTE)
+    assert not free
+    assert not complete
+
+
+def test_a_meeting_makes_the_skip_free_but_not_complete():
+    meeting = Exclusion((Reason.MEETING,), "until 14:00")
+    free, complete = skip_terms(meeting, break_elapsed=30.0, complete_after=5 * MINUTE)
+    assert free
+    assert not complete
+
+
+def test_a_camera_only_exclusion_does_not_make_the_skip_free():
+    """Only a meeting bleeding into the break is the reported problem —
+    an ordinary call exclusion is not the same thing."""
+    call = Exclusion((Reason.MICROPHONE,), "chrome.exe")
+    free, complete = skip_terms(call, break_elapsed=30.0, complete_after=5 * MINUTE)
+    assert not free
+    assert not complete
+
+
+def test_resting_past_the_threshold_is_free_and_complete():
+    free, complete = skip_terms(Exclusion(), break_elapsed=5 * MINUTE, complete_after=5 * MINUTE)
+    assert free
+    assert complete
+
+
+def test_completeness_does_not_require_a_meeting():
+    free, complete = skip_terms(
+        Exclusion(), break_elapsed=10 * MINUTE, complete_after=5 * MINUTE
+    )
+    assert complete
+    assert free, "completing a break has nothing left to charge for"

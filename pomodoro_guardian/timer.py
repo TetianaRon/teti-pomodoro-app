@@ -130,6 +130,9 @@ class PomodoroEngine:
         # than from the last keystroke: you were at the desk for the call,
         # you just weren't typing.
         self._resume_at: float | None = None
+        # A break that came due mid-meeting doesn't fire the instant the
+        # meeting clears — see _apply_exclusion and Config.post_meeting_break_delay.
+        self._break_hold_until: float | None = None
         # A previous run's part-finished interval, waiting to be paid into
         # the next session. Held rather than applied at once — see resume().
         self._resume_elapsed = 0.0
@@ -160,10 +163,14 @@ class PomodoroEngine:
         events: list[Event] = []
 
         # A break already under way runs its course — the lock is up, so no
-        # call could have started against it. Everything else freezes.
+        # call could have started against it.
         if self.state is not State.BREAK:
             frozen = self._apply_exclusion(now, excluded, events, delta)
             if frozen:
+                # The interval itself is not frozen (see _apply_exclusion):
+                # only starting an actual break is held off, so the warning
+                # and the break-due check still need to run every tick.
+                self._check_work_thresholds(now, events)
                 return events
 
         # Time spent on a call still counts as being at the desk, so idle is
@@ -210,6 +217,26 @@ class PomodoroEngine:
         self._active_since = None
         return Event.BREAK_DEFERRED
 
+    def complete_break(self, now: float) -> Event:
+        """Skip out of a break that was already rested through (SPEC §4B).
+
+        Unlike `defer_break`, this is not a purchase against the daily
+        budget — it is the same outcome as the break running to its natural
+        end: the cycle advances, so the long-break count is not stuck
+        re-offering the break just taken, and work resumes with a full
+        fresh interval rather than the leftover lock time bought back.
+        The app decides when this applies (`Config.break_skip_complete_after`
+        of the break must already have elapsed); the engine just enacts it.
+        """
+        self.completed_cycles += 1
+        self.state = State.WORK
+        self._work_elapsed = 0.0
+        self._break_is_long = False
+        self._credited_through = now
+        self._paused = False
+        self._active_since = None
+        return Event.BREAK_ENDED
+
     def position(self) -> Position:
         """The place in the cycle, for persisting across a restart.
 
@@ -251,20 +278,25 @@ class PomodoroEngine:
     def _apply_exclusion(
         self, now: float, excluded: bool, events: list[Event], delta: float = 0.0
     ) -> bool:
-        """Handle SPEC §3 freezing. Returns True if the tick should stop here.
+        """Handle SPEC §3 holding. Returns True if the tick should stop here.
 
-        Two separate things happen here, and conflating them was a real bug.
+        Two separate things used to be conflated here, and conflating them
+        was a real bug (found 2026-08-11): **the break is held off**, but
+        **the interval still runs**. A call is work whether or not anybody
+        is typing, and leaving it out meant a day of meetings could be
+        followed by a full cap's worth of tracked work on top — the cap the
+        app exists to enforce, defeated. Measured that day: an 82-minute
+        meeting credited zero seconds, and only 2.3 of 4.7 hours at the desk
+        were counted.
 
-        **The break is held off.** That is what an exclusion is for, and the
-        interval is left exactly where it was: `_work_elapsed` never moves,
-        so the countdown resumes from the same place when the call ends.
-
-        **The time still counts as work.** A call is work whether or not
-        anybody is typing, and leaving it out meant a day of meetings could
-        be followed by a full cap's worth of tracked work on top — the cap
-        the app exists to enforce, defeated. Measured on 2026-08-11: an
-        82-minute meeting credited zero seconds, and only 2.3 of 4.7 hours
-        at the desk were counted.
+        A second bug was fixed the same way the first one should have been
+        from the start: `_work_elapsed` — the countdown to the *next* break —
+        was left frozen too, so a meeting running long enough looked
+        identical to one that quietly stalled the whole rhythm. It now
+        advances from `delta` exactly like `worked_total`, so the interval
+        (and the warning) keep pace with the wall clock through a meeting;
+        only actually starting the lock is what stays held off, via
+        `_check_work_thresholds`'s `not self._excluded` guard.
 
         Credited from `delta` rather than from the input watermark, because
         the watermark is what deliberately ignores a silent call. `delta` has
@@ -274,10 +306,13 @@ class PomodoroEngine:
         if excluded:
             if not self._excluded:
                 self._excluded = True
+                self._break_hold_until = None
                 events.append(Event.EXCLUSION_STARTED)
             if self.config.count_exclusions_as_work:
                 self.worked_total += delta
                 self.excluded_total += delta
+                if self.state in (State.WORK, State.WARNING):
+                    self._work_elapsed += delta
             # Pin the watermark either way: the call's duration must never be
             # credited a *second* time by the input rules once typing resumes.
             self._credited_through = now
@@ -290,6 +325,15 @@ class PomodoroEngine:
             self._excluded = False
             self._resume_at = now
             events.append(Event.EXCLUSION_ENDED)
+            # A break that came due while the meeting ran doesn't fire the
+            # instant it clears — see Config.post_meeting_break_delay. A
+            # break that isn't due yet is unaffected: this only holds off
+            # one that was already waiting.
+            if (
+                self.state in (State.WORK, State.WARNING)
+                and self._work_elapsed >= self.work_duration()
+            ):
+                self._break_hold_until = now + self.config.post_meeting_break_delay
         return False
 
     # -- per-state handling -------------------------------------------
@@ -352,20 +396,38 @@ class PomodoroEngine:
                 self._paused = True
                 events.append(Event.WORK_PAUSED)
 
+        self._check_work_thresholds(now, events)
+        return events
+
+    def _check_work_thresholds(self, now: float, events: list[Event]) -> None:
+        """Warn, and start a break, once the interval has run long enough.
+
+        Called both from the normal input-driven tick and — since a meeting
+        no longer freezes the interval — from the excluded path in
+        `update()`, so a warning or a break-due state can arrive mid-call
+        exactly as it would on an ordinary work session.
+        """
         if self.suppress_breaks:
             # Focus Mode: keep counting, but neither warn nor lock. The
             # elapsed interval is left standing, so the break arrives
             # immediately once focus ends rather than being forgiven.
-            return events
+            return
 
         if self.state is State.WORK and self._work_elapsed >= self._warn_at():
             self.state = State.WARNING
             events.append(Event.WARNING_STARTED)
 
-        if self._work_elapsed >= self.work_duration():
-            events.append(self._start_break(now))
+        if self._work_elapsed < self.work_duration():
+            return
 
-        return events
+        # A break due while excluded, or still within its post-meeting hold,
+        # waits — see _apply_exclusion. `_work_elapsed` is left standing
+        # rather than clamped, so the break fires the moment either clears.
+        if self._excluded:
+            return
+        if self._break_hold_until is not None and now < self._break_hold_until:
+            return
+        events.append(self._start_break(now))
 
     def _tick_break(
         self, now: float, last_input_at: float, is_active: bool
@@ -392,6 +454,7 @@ class PomodoroEngine:
         ) % self.config.long_break_every == 0
         self._work_elapsed = 0.0
         self._paused = False
+        self._break_hold_until = None
         return Event.BREAK_STARTED
 
     def _maybe_reset_cycles(self, idle_for: float) -> list[Event]:

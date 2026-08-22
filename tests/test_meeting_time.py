@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from pomodoro_guardian.config import MINUTE, Config
 from pomodoro_guardian.timer import Event, PomodoroEngine, State
 
@@ -104,16 +106,37 @@ def test_the_setting_restores_the_old_behaviour():
 # -- and the break still holds off, which is the point of an exclusion --
 
 
-def test_the_interval_does_not_advance_during_a_call():
-    """The whole purpose: no break lands mid-meeting."""
+def test_the_interval_keeps_advancing_through_a_call():
+    """Redesigned 2026-08-22: a meeting no longer freezes the rhythm, only
+    the lock. Before, a long meeting looked identical to a stalled
+    interval — the timer sat frozen at whatever it read when the call
+    started, even a call that ran for hours. Now the interval (and the
+    warning) keep pace with the wall clock exactly as ordinary work would,
+    since time on a call already counts as work per this file's other
+    tests; only actually raising the lock stays held off.
+    """
     h = Harness()
     h.start_working()
     elapsed_before = h.engine.snapshot().remaining
 
-    h.advance(40 * MINUTE, active=False, excluded=True)
+    h.advance(10 * MINUTE, active=False, excluded=True)
 
     assert h.engine.state is State.WORK
-    assert h.engine.snapshot().remaining == elapsed_before
+    assert h.engine.snapshot().remaining == pytest.approx(
+        elapsed_before - 10 * MINUTE, abs=2.0
+    )
+
+
+def test_a_break_due_mid_call_holds_rather_than_locks():
+    """A call outlasting the interval must not lock — but must not reset
+    or silently re-run the interval either. It waits."""
+    h = Harness()
+    h.start_working()
+
+    h.advance(40 * MINUTE, active=False, excluded=True)
+
+    assert h.engine.state in (State.WORK, State.WARNING)
+    assert h.engine.snapshot().remaining == 0.0
 
 
 def test_no_break_fires_during_a_long_call():
@@ -191,3 +214,50 @@ def test_a_call_before_any_work_still_counts_towards_the_cap():
     h.advance(30 * MINUTE, active=False, excluded=True)
 
     assert h.engine.worked_total > 29 * MINUTE
+
+
+# -- the post-meeting buffer (added 2026-08-22) -------------------------
+
+
+def test_a_break_due_mid_call_waits_out_the_post_meeting_delay():
+    """A break already due when the call ends doesn't fire instantly —
+    Config.post_meeting_break_delay gives a moment to wrap up notes."""
+    h = Harness(replace(Config(), post_meeting_break_delay=5 * MINUTE))
+    h.start_working()
+    h.advance(40 * MINUTE, active=False, excluded=True)  # break comes due mid-call
+    assert h.engine.snapshot().remaining == 0.0
+
+    h.advance(1.0, active=False, excluded=False)  # the call just ended
+    assert Event.BREAK_STARTED not in h.events
+
+    h.advance(4 * MINUTE + 58, active=False, excluded=False)
+    assert Event.BREAK_STARTED not in h.events, "fired before the buffer elapsed"
+
+    h.advance(3, active=False, excluded=False)
+    assert Event.BREAK_STARTED in h.events
+
+
+def test_a_zero_delay_fires_the_break_immediately_after_the_call():
+    h = Harness(replace(Config(), post_meeting_break_delay=0))
+    h.start_working()
+    h.advance(40 * MINUTE, active=False, excluded=True)
+
+    h.advance(1.0, active=False, excluded=False)
+
+    assert Event.BREAK_STARTED in h.events
+
+
+def test_the_delay_does_not_apply_to_a_break_that_was_not_yet_due():
+    """The buffer only holds off a break that was already waiting — one
+    that becomes due later, after the call, is unaffected."""
+    h = Harness(replace(Config(), post_meeting_break_delay=5 * MINUTE))
+    h.start_working()
+    h.advance(5 * MINUTE, active=False, excluded=True)  # call ends well before due
+    assert h.engine.snapshot().remaining > 0.0
+
+    h.advance(1.0, active=False, excluded=False)
+    remaining_at_call_end = h.engine.snapshot().remaining
+
+    h.advance(remaining_at_call_end, active=True, excluded=False)
+
+    assert Event.BREAK_STARTED in h.events

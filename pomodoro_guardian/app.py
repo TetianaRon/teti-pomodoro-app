@@ -30,6 +30,7 @@ from .exclusions import (
     Exclusion,
     MeetingDetector,
     NullDetector,
+    Reason,
     create_detector,
 )
 from . import runtime, sounds, summary, tray, walking
@@ -38,6 +39,32 @@ from .pill import CountdownPill
 from .timer import Event, PomodoroEngine, Position, State
 
 TICK_MS = 1000
+
+
+def skip_terms(
+    exclusion: Exclusion, break_elapsed: float, complete_after: float
+) -> tuple[bool, bool]:
+    """(free, complete) for a skip taken right now (SPEC §4B).
+
+    A free function rather than a method so the decision can be tested
+    without a live `Application` — construction pulls in tkinter, the
+    calendar watcher, sound resolution and more, none of which this logic
+    touches.
+
+    **complete** — enough of the break was already rested through
+    (`Config.break_skip_complete_after`) that skipping the rest should
+    count the break as taken: the cycle advances and work resumes on a
+    full fresh interval, rather than the same break coming due again a
+    few minutes later. Implies free — there is nothing left to buy back.
+
+    **free** — no budget debit even short of that, because a meeting is
+    (or is about to be) exactly why the skip is needed: the 10-minute
+    meeting lead isn't long enough to keep a 15-minute break from bleeding
+    into the meeting it was meant to clear before.
+    """
+    complete = break_elapsed >= complete_after
+    meeting = exclusion.active and Reason.MEETING in exclusion.reasons
+    return (meeting or complete), complete
 
 
 class Application:
@@ -145,22 +172,42 @@ class Application:
 
     # -- custom skip (SPEC §4B) ---------------------------------------
 
+    def _break_elapsed(self) -> float:
+        """How much of the current break has actually run, in seconds."""
+        if self._break_length <= 0:
+            return 0.0
+        return max(0.0, self._break_length - self.engine.snapshot().remaining)
+
+    def _skip_terms(self) -> tuple[bool, bool]:
+        """(free, complete) for a skip taken right now (SPEC §4B)."""
+        return skip_terms(
+            self._exclusion, self._break_elapsed(),
+            self.config.break_skip_complete_after,
+        )
+
     def _skip_offer(self) -> SkipOffer:
         """What the hold-Escape menu should show right now."""
         budget = self.config.custom_skip_daily_budget
+        free, complete = self._skip_terms()
         options = tuple(
             SkipOption(
                 seconds=seconds,
                 label=f"{seconds / 60:.0f} min",
-                enabled=self._state.can_skip(seconds, budget),
+                enabled=free or self._state.can_skip(seconds, budget),
             )
             for seconds in self.config.custom_skip_options
         )
+        if complete:
+            note = "free — already rested, counts as taken"
+        elif free:
+            note = "free — meeting"
+        else:
+            note = self._cap.describe() if self._cap else ""
         return SkipOffer(
             options,
             self._state.skip_remaining(budget),
             emergency=self._emergency_option(),
-            note=self._cap.describe() if self._cap else "",
+            note=note,
         )
 
     def _emergency_option(self) -> SkipOption | None:
@@ -653,19 +700,39 @@ class Application:
             self._log(f"warning: could not save state ({exc})")
 
     def _take_skip(self, seconds: float) -> None:
-        """Spend part of the daily budget and push the break back."""
-        self._state = self._state.with_skip(seconds)
-        self._save_state()
+        """End or push back the break, per SPEC §4B's free/complete rules."""
+        free, complete = self._skip_terms()
+
+        if complete:
+            # Already rested through it — this is the break ending, not a
+            # purchase, so nothing is deferred and nothing is debited.
+            rested = self._break_elapsed()
+            self.overlay.release()
+            self.engine.complete_break(time.monotonic())
+            self._log(
+                f"break skipped after resting {rested / 60:.0f} min — "
+                "counts as taken"
+            )
+            self.history.record(
+                history_module.BREAK_TAKEN, seconds=rested,
+                detail=f"skipped after {rested / 60:.0f} min rested",
+            )
+            return
+
+        if not free:
+            self._state = self._state.with_skip(seconds)
+            self._save_state()
         self.overlay.release()
         self.engine.defer_break(seconds, time.monotonic())
         left = self._state.skip_remaining(self.config.custom_skip_daily_budget)
+        reason = " (free — meeting)" if free else ""
         self._log(
-            f"break skipped for {seconds / 60:.0f} min "
+            f"break skipped for {seconds / 60:.0f} min{reason} "
             f"({left / 60:.0f} min of budget left today)"
         )
         self.history.record(
             history_module.BREAK_SKIPPED, seconds=seconds,
-            detail=f"{left / 60:.0f} min left",
+            detail=f"{'free, meeting; ' if free else ''}{left / 60:.0f} min left",
         )
 
     def _roll_state(self) -> None:

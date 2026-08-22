@@ -150,14 +150,38 @@ straight past. Focus Mode (§6) had already reasoned this through and says so in
 invisible to the daily cap and let a 2h session be worked for free." The same
 argument applies to meetings; it had simply never been carried across.
 
-So while excluded: the interval does not advance and no break fires, but wall
-clock accrues against the daily cap, at wall-clock rate and with nobody typing
-— because listening on a call is work. Credited from the tick delta rather than
-the input watermark, which is precisely the thing that ignores a silent call.
-The watermark is still pinned, so the input rules cannot pay for the same
-minutes a second time once typing resumes, and a machine that slept mid-meeting
-credits nothing because the delta was already discarded upstream (§2.4's
-`max_tick`).
+So while excluded: no break fires, but wall clock accrues against the daily
+cap, at wall-clock rate and with nobody typing — because listening on a call
+is work. Credited from the tick delta rather than the input watermark, which
+is precisely the thing that ignores a silent call. The watermark is still
+pinned, so the input rules cannot pay for the same minutes a second time once
+typing resumes, and a machine that slept mid-meeting credits nothing because
+the delta was already discarded upstream (§2.4's `max_tick`).
+
+**The interval itself no longer freezes either (redesigned 2026-08-22).**
+Originally it did: `_work_elapsed` — the countdown to the *next* break — sat
+exactly where it was for the whole exclusion, on the reasoning that "the
+break is held off" and "the interval is frozen" were the same thing. They
+are not, and treating them as one meant a meeting that ran long looked
+identical to the rhythm having quietly stalled — reported from live use: a
+25-minute interval that happened to have a 40-minute meeting land on it
+stayed frozen at whatever it read when the call started, so a break that was
+overdue by 15 minutes the moment the call ended read as freshly begun
+instead. The interval now advances through a call exactly as it advances
+through ordinary work — via the same tick-delta crediting as `worked_total`,
+gated the same way by `count_exclusions_as_work` — while only *starting the
+lock* stays held off. A warning can still arrive mid-meeting; only the break
+itself waits.
+
+**A break that comes due while still excluded is deferred, not dropped.**
+`_work_elapsed` is left standing at or past `work_duration()` rather than
+clamped, so the moment the exclusion clears the engine already knows a break
+is owed. It doesn't fire the instant the meeting ends, though —
+`Config.post_meeting_break_delay` (default 5 min) holds it a little longer,
+so the lock doesn't land in the middle of wrapping up notes from the call
+that just finished. Set to 0 for immediate. This only holds off a break that
+was *already* due when the exclusion ended; one that becomes due later, after
+a short meeting, is unaffected and arrives on its own normal schedule.
 
 Call time is also tallied on its own and reported by `--history` as "1.4h on
 calls" inside the day's total, because a day that was mostly meetings and a day
@@ -223,14 +247,17 @@ The measurement is specific to Chrome and Meet. Software mute keeping a
 capture device acquired is standard behaviour, so native Zoom and Teams are
 expected to match, but that has not been measured.
 
-**Freezing behaviour.** While excluded, the work countdown freezes rather than
-running on, no session starts from activity, and time on the call is never
-retroactively credited as work once typing resumes. A break *already* locked
-runs its full course — you cannot join a call through a lock, and cutting a
-break short would be worse than letting it finish. When an exclusion lifts,
-idle time is measured from that moment rather than from the last keystroke:
-without that, a two-hour meeting you barely typed in would look like an
-absence and discard the session the instant it ended.
+**Freezing behaviour.** While excluded, no session starts from activity, and
+time on the call is never retroactively credited as work once typing resumes
+(the watermark is pinned — see above). The work *countdown*, as of the
+2026-08-22 redesign above, keeps running rather than freezing — only the lock
+itself is what an exclusion holds off. A break *already* locked runs its full
+course — you cannot join a call through a lock, and cutting a break short
+would be worse than letting it finish, except for the one deliberate crack in
+that rule described in §4A below. When an exclusion lifts, idle time is
+measured from that moment rather than from the last keystroke: without that,
+a two-hour meeting you barely typed in would look like an absence and discard
+the session the instant it ended.
 
 **Known limitation, accepted (confirmed 2026-08-09).** Any app holding the
 microphone open — a conferencing tool that never releases it, a recording app
@@ -247,8 +274,10 @@ Two things worth being explicit about, because they are easy to misread:
   nothing holds the camera or mic resets it. Ordinary back-to-back meetings,
   where each call releases the device on hang-up, will never trigger it.
 - **On a heavy meeting day the app does almost nothing**, by design. Breaks
-  do not accumulate, and none is owed when the calls end — the countdown
-  simply resumes where it froze.
+  do not accumulate — there is still only ever one due at a time — and the
+  countdown has been running the whole time rather than sitting frozen; if
+  one came due mid-meeting it waits behind `post_meeting_break_delay` and
+  then fires once, same as any other day.
 
 `--exclusions` reports what is currently holding breaks off; `--no-exclusions`
 disables the mechanism entirely.
@@ -269,6 +298,18 @@ states ("starting 19:05" versus "until 20:05") rather than misdescribing a
 pre-meeting hold as the meeting itself. Google's `basic.ics` published the new
 event within a couple of minutes, so feed lag is not the obstacle it was
 expected to be.
+
+**A break that bleeds into a meeting is free to skip (added 2026-08-22).**
+The 10-minute lead only covers a break *starting*; it says nothing about a
+break that had already started before the lead window began and is still
+running once the meeting itself arrives — a 15-minute long break starting
+11 minutes before a meeting isn't held off by a 10-minute lead, and runs 4
+minutes into the meeting it was meant to have cleared for. Rather than
+auto-cutting a break short (§3's "a break already locked runs its course"
+stays the default), the hold-Escape skip menu (§4B) waives its usual budget
+cost whenever a meeting exclusion is active at the moment of skipping: every
+duration is offered free. It's still a deliberate choice, not an automatic
+interruption — the break keeps running if you don't reach for it.
 
 **B. Custom skip — capped.**
 A manual "skip this break" action with a fixed choice of duration: 5 / 10 / 20 minutes. All custom skips share one **60-minutes-per-day accumulated cap**. Once the daily 60 minutes are used, no more custom skips are available that day — the lock enforces normally.
@@ -322,6 +363,31 @@ The distinction that makes this work: the watchdog guards against **the app
 failing**, not against the user. It cannot be invoked, has no UI, and grants
 no discretionary escape — so closing the Escape route in Phase 3 costs
 nothing in safety.
+
+**Skipping a break already mostly rested counts it as taken (added
+2026-08-22).** Reported from live use: the 15-minute long break started, 10
+minutes were spent actually resting, then an urgent message needed a reply —
+so the break was skipped. The *next* break later that day arrived as another
+full 15-minute long break, because `defer_break` deliberately does not
+advance the cycle count (a skip is not a taken break — see the tension
+resolved above), and with the count unmoved the 4th-cycle arithmetic simply
+computed "long" again. That's correct for a break abandoned after a few
+seconds; it's wrong for one that had, in every practical sense, already
+happened.
+
+`Config.break_skip_complete_after` (5 min) is the line between the two.
+Skipping before that threshold behaves exactly as before: `defer_break`
+spends the budget and buys back the chosen minutes. Skipping at or past it
+takes a different path — `PomodoroEngine.complete_break()` — that advances
+`completed_cycles` and resumes on a full fresh interval, precisely as if the
+break had run to its natural end, only cut short. It costs nothing from the
+daily budget: there is nothing left to buy back once the break is being
+counted as taken rather than deferred. This is also *how* §4A's meeting
+free-skip and this rule end up overlapping in practice rather than
+competing — a break several minutes into its meeting-driven overlap has
+usually already cleared the 5-minute mark too, so the same skip is free for
+both reasons at once; app.py's `skip_terms()` computes them independently
+and either one alone is enough to waive the budget.
 
 ## 5. Daily work cap + Emergency Mode
 

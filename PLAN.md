@@ -17,7 +17,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 416 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 428 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -25,7 +25,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 416 tests
+.venv\Scripts\python.exe -m pytest tests                 # 428 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -56,12 +56,18 @@ reporting what happens** — which is how the last dozen commits were found. The
 numbers are all still guesses: 12h cap, 50 min walking, 25/5, 11:45/15:20
 reminders, 90s input gap, 1.4s banner hold.
 
-### Unverified on hardware (the only outstanding risk)
+### Unverified on hardware
 The lock screen's **`M` (media) and `W` (stop treadmill timer)** keys share one
 key-routing path and neither has run for real. `local/checkmedia.py` exercises
 `M`; start a walk from the tray first and one lock covers both. `M` also lifts
 keyboard suppression for a few milliseconds — the script reports whether it
 came back intact, which is the failure that would matter.
+
+**Also unverified (2026-08-22):** the meeting/skip redesign — a break
+bleeding into a real meeting reads as free-to-skip, and a break already due
+waits `post_meeting_break_delay` after the call ends rather than firing
+instantly. Both are engine-level tested but have not been watched against a
+real calendar feed and a real lock screen yet.
 
 ### Two habits that account for most bugs found
 1. **Assert on the rendered result, not the requested one.** Geometry checks
@@ -163,6 +169,70 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-22 — the timer stopped freezing during meetings, and skips stopped restarting the long break
+
+First of a batch of feedback items (this repo's normal mode now — see "The
+work now is feedback-driven" above). This sitting covers the three most
+tangled ones together, since they share the same code paths: the meeting
+timer/skip redesign (checkpoint 1 of 4). The other three — overwork skip
+caps, a 10-min pre-cap warning window, and three standalone bug fixes (media
+pause, walking-reminder position, warning-pill lag) — are separate sessions.
+
+**The interval no longer freezes during a meeting.** It used to: an
+exclusion held `_work_elapsed` exactly where it was for the whole call, on
+the reasoning that "hold the break off" and "freeze the countdown" were the
+same thing. They never were — `worked_total` was already fixed to advance
+during a call on 2026-08-11 for exactly this reason, and the interval simply
+never got the same treatment. The symptom: a 40-minute meeting sitting on a
+25-minute interval left the countdown reading whatever it had when the call
+started, so a break overdue by 15 minutes the moment the call ended looked
+freshly begun. Now `_work_elapsed` advances by tick-delta through a call
+exactly like `worked_total` does; only actually raising the lock stays held
+off, via a new `_check_work_thresholds` helper both the normal tick and the
+excluded path call into. See `docs/SPEC.md` §3.
+
+**A break already due when the meeting ends now waits a beat before
+firing** — `Config.post_meeting_break_delay` (default 5 min, 0 for
+immediate) — rather than locking the instant the call clears, so there's a
+moment to write down what just got decided. Only holds off a break that was
+*already* waiting; one that becomes due later is unaffected.
+
+**A break that bleeds into a meeting is free to skip.** The existing
+10-minute meeting lead only stops a break from *starting* late; it doesn't
+stop one that had already started from *running into* the meeting — a
+15-minute long break starting 11 minutes early isn't covered by a 10-minute
+lead and lands 4 minutes into the call. Rather than auto-cutting the break
+(keeping §3's "a break already locked runs its course" as the default), the
+skip menu now waives its usual 60-min/day budget whenever a meeting
+exclusion is active at the moment of skipping.
+
+**Skipping after resting ≥5 minutes now counts the break as taken, not
+deferred.** Reported live: a 15-min break, 10 minutes actually rested, then
+skipped for an urgent message — and the *next* break arrived as another full
+15-min long break, because `defer_break()` deliberately never advances the
+cycle count (a skip isn't a taken break), so the unchanged count made the
+4th-cycle arithmetic recompute "long" again. Below
+`Config.break_skip_complete_after` (5 min), nothing changes: `defer_break`
+still spends budget and buys back the chosen minutes. At or past it, a new
+`PomodoroEngine.complete_break()` path advances the cycle and resumes on a
+full fresh interval instead — free, since there's nothing left to buy back.
+This is also where the meeting free-skip and the rest-complete rule overlap
+in practice: a break far enough into a meeting has usually also cleared 5
+minutes rested, so `app.py`'s new `skip_terms()` computes both independently
+and either alone waives the budget.
+
+**Verified:** 428 tests (12 new — `tests/test_skips.py` gained engine
+coverage for `complete_break()` and the pure `skip_terms()` decision
+function, `tests/test_meeting_time.py` gained the post-meeting-delay cases),
+pyflakes clean. `skip_terms()` was deliberately pulled out of `Application`
+into a free function in `app.py` so it's testable without constructing a
+live `Application` (tkinter root, calendar watcher, sound resolution) —
+nothing in the test suite does that today, and this logic didn't need to be
+the first. **Not verified on hardware**: the free/complete skip menu text
+and the post-meeting delay haven't been watched against a real calendar
+feed and a real lock screen yet — flagged the same way the existing `M`/`W`
+key handling already is in the Handoff section above.
 
 ### 2026-08-11 — the tray would have killed the app on her first real launch
 
