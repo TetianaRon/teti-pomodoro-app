@@ -17,6 +17,95 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
+### In progress: a 9-item feedback batch, checkpoint 1 of 4 done
+
+Tetiana filed 9 feedback items in one sitting (2026-08-22) covering the
+meeting/timer/skip interaction, overwork behaviour, a daily-cap warning, and
+three standalone bugs. Given the size, it's split into 4 independent
+checkpoints — each its own explore → implement → test → commit → doc-update
+cycle — so a session boundary anywhere below loses nothing already landed.
+
+**Checkpoint 1 — meeting/skip/timer redesign — done, committed `b58e219`.**
+See the "2026-08-22" Session Worklog entry below and `docs/SPEC.md` §3–4B for
+the full account. Covered: the work interval no longer freezes during a
+meeting (only the lock itself is held off); a break already due when a
+meeting ends waits `Config.post_meeting_break_delay` before firing; a break
+bleeding into a meeting is free to skip; skipping after
+`Config.break_skip_complete_after` (5 min) rested counts the break as taken
+via the new `PomodoroEngine.complete_break()`, instead of restarting the long
+break via `defer_break()`. **Not yet watched against a real calendar feed and
+lock screen** — see "Unverified on hardware" below.
+
+**Checkpoint 2 — overwork/Emergency-Mode skip rules — next, not started.**
+Two asks, from the original feedback, not yet re-derived from anything —
+this is the plan as scoped before the session that would have built it was
+interrupted:
+- Once the day is over its effective cap (`self._cap.over` in `app.py`,
+  already what flips `self.engine.overtime` in `_update_cap()`), custom
+  skips should offer **only a 5-minute option**, with a **15-minute total
+  daily cap** — separate from the ordinary `custom_skip_daily_budget` (60
+  min). Rationale (contributor's own words): unrestricted skips during
+  overtime just extend the work day another hour, defeating the point of
+  the cap having been reached at all.
+- **All overwork breaks should be a fixed 10 minutes**, regardless of
+  whether the cycle would otherwise have been short or long — meant to read
+  as "wrap up," not as an ordinary break.
+- What's already in place to build on: `Config.overtime_work_duration` (5
+  min) and `Config.overtime_warning_lead` (1 min) already shorten the work
+  interval past the cap; `Config.emergency_grant_hours` (1h) and
+  `app.py`'s `_emergency_option()`/`_take_emergency` (not yet read this
+  session — start there) handle Emergency Mode itself. `caps.py`'s
+  `CapStatus` is pure and already read this session (`.over`,
+  `.overtime_seconds`, `.effective_seconds` — no changes anticipated there).
+  What's missing: `timer.py`'s `_break_duration()` only branches on
+  `_break_is_long`, with no awareness of `self.overtime` — it will need a
+  third case. The skip budget split will likely mean a second
+  `AppState` field (parallel to `custom_skip_used`) and a second
+  options/budget branch in checkpoint 1's `_skip_offer()`/`_take_skip()` in
+  `app.py`, keyed on `self._cap.over` (or `self.engine.overtime`) rather
+  than the ordinary budget — independent of checkpoint 1's `free`/`complete`
+  logic, which should keep applying during overtime too (a meeting is still
+  a meeting). `state.py` and `app.py`'s emergency-mode section have not
+  been read yet — do that before designing the split.
+
+**Checkpoint 3 — 10-minute pre-daily-cap warning — not started.** Mirror the
+existing 2-minute break warning (`Config.warning_lead`, the `WarningBanner`/
+`CountdownPill` pair in `pill.py`) but keyed off `CapStatus.remaining_seconds`
+reaching 10 minutes instead of off the work interval. In that final 10-minute
+window, **regular breaks should be suppressed** so the day's work can finish
+uninterrupted. Open design questions to resolve before writing code (not yet
+asked of the contributor): does suppression cover long breaks too, or only
+the ordinary short ones; how this interacts with Emergency Mode (does
+activating it clear the suppression along with raising the cap, since the
+10-minute window was measured against the cap that just moved); and whether
+this reuses `timer.py`'s existing `suppress_breaks` flag (Focus Mode's
+mechanism) or needs its own, since Focus Mode's is a *user-invoked, capped*
+override and this would be automatic and daily.
+
+**Checkpoint 4 — three standalone bug fixes — not started, not yet explored.**
+- **Media pause doesn't work.** SPEC §2 documents the mechanism:
+  `VK_MEDIA_PLAY_PAUSE` sent just before input suppression starts, gated by
+  an `is_audio_playing()` peak-level check that ignores this app's own pid.
+  Note `Config.pause_media_on_lock` defaults to **False** — check first
+  whether the contributor has it enabled locally (it wouldn't fire at all
+  otherwise) before assuming the audio-detection path itself is broken.
+  `M` on the lock screen is the manual fallback and is *also* reported
+  unverified on hardware (see below) — establish which of the two paths
+  (automatic vs. manual `M`) is the one that's actually failing before
+  changing anything.
+- **Walking-reminder window is mispositioned.** Likely `walking.WalkPrompt`
+  not applying the same multi-monitor / negative-x-offset geometry handling
+  that `pill.py`/`overlay.py` already had to fix (see PLAN.md's Session
+  Worklog, 2026-08-11 pill entries) — the contributor's second monitor sits
+  at a negative x-offset, which has caused this exact class of bug before.
+- **The 2-minute warning countdown visibly lags.** Look at `pill.py`'s
+  seconds-driven countdown (PLAN.md notes the countdown pill normally only
+  redraws once a minute, but "the warning does tick seconds") — check
+  redraw cost and `after()` scheduling drift against the 1s app tick.
+
+Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
+none of these three have had their code located yet.
+
 **State: all 8 phases complete and in daily use.** 428 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
