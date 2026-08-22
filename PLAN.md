@@ -95,7 +95,7 @@ none of these three have had their code located yet.
 
 **State: all 8 phases complete and in daily use.** 441 tests, pyflakes clean,
 working tree clean, `teti-laptop` pushed and tracking `origin/teti-laptop`
-(8 commits ahead of `origin/main`, which hasn't moved since this branch's
+(9 commits ahead of `origin/main`, which hasn't moved since this branch's
 merge-base — no PR opened yet, that's a separate step if/when wanted). The
 app runs from a Startup shortcut at login; there is no build step. No skill
 is required to work on this project — see `CLAUDE.md`'s session practices.
