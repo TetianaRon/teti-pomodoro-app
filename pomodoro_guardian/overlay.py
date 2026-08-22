@@ -338,6 +338,13 @@ class LockOverlay:
         self._swallow_escape = False
         self._suppressor: InputSuppressor | None = None
         self._released_early = False
+        # When the Escape hold began, so the bottom caption can count down
+        # live instead of staying silent for the full 3s — reported
+        # 2026-08-22 as reading like the menu needed a *release* to appear
+        # at all, when actually nothing acknowledged the hold was even
+        # registered until it finished. None while no hold is in progress.
+        self._hold_started_at: float | None = None
+        self._hold_captions: list[tk.Label] = []
         # Whether the current lock is actually blocking input, or is only a
         # full-screen reminder. Drives what the screen admits to, and
         # whether the z-order is fought for — see _bind_local_keys.
@@ -383,6 +390,7 @@ class LockOverlay:
         back_at = time.strftime("%H:%M", time.localtime(time.time() + duration))
 
         self._menu_open = False
+        self._hold_started_at = None
         for rect in monitor_rects(self._root):
             window, countdown, body = self._build_window(
                 rect, heading, back_at, is_long_break
@@ -428,6 +436,13 @@ class LockOverlay:
             for label in self._hints:
                 if label.cget("text") != hint:
                     label.configure(text=hint)
+            # Live feedback while Escape is held, counting down to the same
+            # caption once it either finishes or is let go — see
+            # _hold_progress_caption for why this exists.
+            caption = self._hold_progress_caption() or self._skip_caption()
+            for label in self._hold_captions:
+                if label.cget("text") != caption:
+                    label.configure(text=caption)
         # Something else going topmost mid-break would defeat the lock, so
         # we take the z-order back on every tick rather than trusting the
         # attribute to hold for the whole break.
@@ -454,10 +469,12 @@ class LockOverlay:
         self._windows = []
         self._countdowns = []
         self._hints = []
+        self._hold_captions = []
         self._bodies = []
         self._menus = []
         self._notices = []
         self._menu_open = False
+        self._hold_started_at = None
 
     # -- internals ----------------------------------------------------
 
@@ -511,17 +528,12 @@ class LockOverlay:
         self._hints.append(hint)
 
         if self._config.safety_unlock:
-            hint = (
-                f"hold Esc for {self._config.safety_unlock_hold:.0f}s "
-                f"to skip this break"
-                if self._skip_offer is not None
-                else f"hold Esc for {self._config.safety_unlock_hold:.0f}s "
-                     f"to release"
-            )
-            tk.Label(
-                window, text=hint,
+            caption = tk.Label(
+                window, text=self._skip_caption(),
                 font=("Segoe UI", pt(10)), bg=self.BG, fg=self.FAINT,
-            ).place(relx=0.5, rely=0.94, anchor="center")
+            )
+            caption.place(relx=0.5, rely=0.94, anchor="center")
+            self._hold_captions.append(caption)
 
         # Filled in only when input turns out not to be blocked, so the
         # screen never claims to be enforcing something it isn't.
@@ -683,6 +695,7 @@ class LockOverlay:
             except queue.Empty:
                 return
             if kind == "hold":
+                self._hold_started_at = None
                 if self._skip_offer is None:
                     # Phase 1 behaviour: no skip system wired up, so release.
                     self._released_early = True
@@ -694,7 +707,20 @@ class LockOverlay:
                     # Escape is free to mean "dismiss" again now that the
                     # hold which opened the menu has ended.
                     self._swallow_escape = False
+                    # Let go before the full hold — the countdown caption
+                    # reverts to its resting text rather than freezing.
+                    self._hold_started_at = None
             elif kind == "key":
+                # The very first press of a hold, seen well before the
+                # timer that opens the menu fires (SPEC §4B) — this is what
+                # lets the caption count down live instead of staying silent
+                # for the whole 3s, which read as the menu needing a
+                # *release* to appear at all (reported 2026-08-22).
+                if (
+                    name == "esc" and not self._menu_open
+                    and self._hold_started_at is None
+                ):
+                    self._hold_started_at = time.monotonic()
                 if self._walk_key(char):
                     continue
                 if not self._media_key(char, name):
@@ -719,6 +745,36 @@ class LockOverlay:
         )
         self._flash("muted" if mute else "media toggled")
         return True
+
+    def _skip_caption(self) -> str:
+        """The resting bottom caption naming the Escape-hold gesture."""
+        if self._skip_offer is not None:
+            return (
+                f"hold Esc for {self._config.safety_unlock_hold:.0f}s "
+                f"to skip this break"
+            )
+        return f"hold Esc for {self._config.safety_unlock_hold:.0f}s to release"
+
+    def _hold_progress_caption(self) -> str | None:
+        """Live countdown while Escape is held, or None to show the resting
+        caption instead.
+
+        Reported 2026-08-22: the skip menu appeared to need a *release* to
+        show up, because nothing on screen acknowledged the hold for the
+        full 3 seconds it actually takes — the menu itself was always timed
+        from the press, not the release, but silence for three whole
+        seconds reads exactly like nothing is happening. This is what fills
+        that silence: counted from `_hold_started_at`, set the instant the
+        first Escape keydown of a hold is seen (see `_drain`).
+        """
+        if self._hold_started_at is None:
+            return None
+        remaining = self._config.safety_unlock_hold - (
+            time.monotonic() - self._hold_started_at
+        )
+        if remaining <= 0:
+            return None
+        return f"still holding — opening in {remaining:.0f}s"
 
     def _hint_text(self) -> str:
         """The key hints, including the walking line only while walking."""
@@ -767,6 +823,12 @@ class LockOverlay:
         self._swallow_escape = True
         self._offer = self._skip_offer()
         self._menu_open = True
+        # Otherwise the countdown caption freezes on whatever it last said
+        # ("opening in 1s"...) for as long as the menu stays open, since
+        # tick() stops refreshing it once _menu_open is set.
+        caption = self._skip_caption()
+        for label in self._hold_captions:
+            label.configure(text=caption)
         for body in self._bodies:
             self._menus.append(self._build_menu(body))
 

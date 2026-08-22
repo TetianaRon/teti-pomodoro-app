@@ -93,7 +93,7 @@ override and this would be automatic and daily.
 Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
-**State: all 8 phases complete and in daily use.** 435 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 441 tests, pyflakes clean,
 `main` clean and pushed. The app runs from a Startup shortcut at login; there is
 no build step. No skill is required to work on this project — see `CLAUDE.md`'s
 session practices.
@@ -101,7 +101,7 @@ session practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 435 tests
+.venv\Scripts\python.exe -m pytest tests                 # 441 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -151,6 +151,14 @@ actually showing 5-minute-only options once the daily cap is reached, its
 fixed 10 minutes rather than the ordinary short/long duration — all engine-
 and state-level tested, none watched on a real lock screen at end of a long
 day yet.
+
+**Also unverified (2026-08-22, hold-caption fix):** whether the bottom
+caption actually visibly counts down while holding real Escape against a
+real lock. The mechanism-level claim (the menu has always timed off the
+press, not the release) is confirmed by reading the code and by tests; the
+UX diagnosis (three seconds of silence was being misread as "needs a
+release") is a plausible explanation, not a confirmed root cause — see the
+"2026-08-22 — the skip-menu hold" Session Worklog entry.
 
 ### Two habits that account for most bugs found
 1. **Assert on the rendered result, not the requested one.** Geometry checks
@@ -252,6 +260,50 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-22 — the skip-menu hold now shows it's working before the 3 seconds are up
+
+Reported outside the 4-checkpoint feedback batch: holding Escape to open the
+skip menu felt like the options only appeared once you *released* the key.
+Reading the mechanism said otherwise — both the global hook path
+(`InputSuppressor._on_press` in `overlay.py`) and the local tkinter fallback
+(`_start_local_hold`) arm their timer on the **press**, independent of
+release, exactly as intended. Asked whether to keep that hold-based gesture
+(fixing whatever made it read as release-gated) or drop it for a plain
+Escape tap; **kept the 3s hold** — it's the friction that makes the skip "a
+deliberate act, not a casual one," per §4B's own reasoning for why it was
+never a plain unlock.
+
+**The likely cause: three full seconds of total silence.** Nothing on
+screen acknowledged a hold was even registered until either the menu
+appeared or you gave up and let go — which, held long enough out of
+uncertainty, would make the menu's actual appearance line up with whenever
+you happened to release, making it look causally tied to release when it
+never was. No reproducible timing bug was found in the mechanism itself
+(covered by an existing test, `test_auto_repeat_does_not_push_the_hold_deadline_back`);
+this is a UX-silence diagnosis, not a confirmed root cause, and can only
+really be settled by holding the key on a real machine and watching what
+happens.
+
+**Fix: the bottom caption now counts down live.** `LockOverlay` tracks
+`_hold_started_at`, set the instant the *first* keydown of a hold is seen
+(`_drain()`'s `"key"` branch, guarded so auto-repeat doesn't keep resetting
+it) and cleared on early release or once the menu opens. Each `tick()`
+(the same 1s cadence everything else in the lock already runs on) computes
+`_hold_progress_caption()` and swaps the resting "hold Esc for 3s to skip
+this break" caption for "still holding — opening in Ns", counting down
+until the menu takes over or the key is let go. `_open_menu()` explicitly
+resets the caption the instant it opens, so it can't freeze mid-countdown
+behind the now-open menu.
+
+**Verified:** 441 tests (6 new in `tests/test_cosmetic_lock.py` — hold-start
+tracking, auto-repeat not resetting it, early-release clearing it, and the
+caption's text at each stage, the last driven by monkeypatching
+`overlay.time.monotonic` since the countdown needs a controllable clock),
+pyflakes clean. **Not verified on hardware** — this is exactly the class of
+timing/input behaviour this project's own "Two habits" note says is
+invisible to review and needs a real keyboard; run `local/checklock.py` or
+just hold Escape against a real lock and watch the bottom caption move.
 
 ### 2026-08-22 — overwork skips got their own tiny budget, and overwork breaks stopped varying in length
 

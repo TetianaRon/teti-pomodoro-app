@@ -338,6 +338,19 @@ The gesture is a good fit — it is already deliberate rather than accidental,
 it is discoverable from the lock screen itself, and it needs no tray
 interaction at the one moment the tray is behind a full-screen window.
 
+**The hold now counts down live, not just on completion (added
+2026-08-22).** Reported from live use: the menu appeared to require
+*releasing* Escape to show up, when the mechanism has always timed it from
+the *press* — a `threading.Timer` armed the instant Escape goes down, firing
+independently of when (or whether) it's let go. The actual gap was that
+nothing on screen acknowledged the hold for the full 3 seconds it takes, and
+three seconds of silence reads exactly like the gesture needs something
+else to work. The bottom-of-screen caption now switches from its resting
+"hold Esc for 3s to skip this break" to a live "still holding — opening in
+Ns" the instant the first keydown of a hold is seen, counting down each
+tick until either the menu opens (reverting the caption) or Escape is
+released early (same).
+
 **Built and verified 2026-08-09.** Two details worth recording, both found only
 by testing against a real keyboard:
 
