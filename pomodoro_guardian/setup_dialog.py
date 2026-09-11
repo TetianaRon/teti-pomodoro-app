@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 from tkinter import ttk
 
-from . import calendar_feed, settings as settings_module, sounds
+from . import calendar_feed, settings as settings_module, sound_pack, sounds
 from .config import MINUTE
 from .settings import Settings
 from .walking import parse_times
@@ -229,43 +229,107 @@ class SetupDialog:
                "minutes", "work interval shortens instead of stopping")
 
     def _build_sounds(self, parent, row):
+        self._sounds_parent = parent
+        self._sounds_row = row
         frame = _section(parent, row, "Chimes")
+        self._sounds_frame = frame
         clips = sounds.available()
+        next_row = 0
         if not clips:
             ttk.Label(
                 frame,
-                text=("No clips found. Drop .mp3 or .wav files into\n"
-                      f"assets/{sounds.SOUNDS_DIRNAME}/ and reopen this window."),
+                text=("No clips yet. Download the starter pack below, or "
+                      f"drop your own .mp3/.wav files into\n"
+                      f"assets/{sounds.SOUNDS_DIRNAME}/ and reopen this "
+                      "window."),
                 foreground="#555", justify="left",
-            ).grid(row=0, column=0, columnspan=3, sticky="w")
-            return
+            ).grid(row=next_row, column=0, columnspan=3, sticky="w")
+            next_row += 1
+        else:
+            # Labels are shown, filenames are stored — the numeric id in a
+            # stock filename is meaningless in a menu but ties it to its
+            # source.
+            self._clip_by_label = {sounds.NONE_LABEL: ""}
+            for clip in clips:
+                self._clip_by_label[sounds.label(clip)] = clip.name
+            choices = list(self._clip_by_label)
 
-        # Labels are shown, filenames are stored — the numeric id in a stock
-        # filename is meaningless in a menu but is what ties it to its source.
-        self._clip_by_label = {sounds.NONE_LABEL: ""}
-        for clip in clips:
-            self._clip_by_label[sounds.label(clip)] = clip.name
-        choices = list(self._clip_by_label)
+            for text, key in (
+                ("Break starts", "sound_start"), ("Break ends", "sound_end")
+            ):
+                ttk.Label(frame, text=text).grid(
+                    row=next_row, column=0, sticky="w", pady=3)
+                ttk.Combobox(
+                    frame, textvariable=self._vars[key], values=choices,
+                    state="readonly", width=26,
+                ).grid(row=next_row, column=1, sticky="w", padx=8)
+                ttk.Button(
+                    frame, text="Play", width=6,
+                    command=lambda k=key: self._play_choice(k),
+                ).grid(row=next_row, column=2, sticky="w")
+                next_row += 1
 
-        for index, (text, key) in enumerate(
-            (("Break starts", "sound_start"), ("Break ends", "sound_end"))
-        ):
-            ttk.Label(frame, text=text).grid(row=index, column=0, sticky="w",
-                                             pady=3)
-            ttk.Combobox(
-                frame, textvariable=self._vars[key], values=choices,
-                state="readonly", width=26,
-            ).grid(row=index, column=1, sticky="w", padx=8)
-            ttk.Button(
-                frame, text="Play", width=6,
-                command=lambda k=key: self._play_choice(k),
-            ).grid(row=index, column=2, sticky="w")
+        pending = sound_pack.missing()
+        if pending:
+            label = (
+                f"Download starter pack ({len(pending)} clip"
+                f"{'s' if len(pending) != 1 else ''}, from pixabay.com)"
+            )
+            self._pack_button = ttk.Button(
+                frame, text=label, command=self._download_pack,
+            )
+            self._pack_button.grid(
+                row=next_row, column=0, columnspan=3, sticky="w",
+                pady=(8 if clips else 4, 0))
+            next_row += 1
+        else:
+            self._pack_button = None
+        self._pack_status = ttk.Label(frame, text="", foreground="#555",
+                                      justify="left")
+        self._pack_status.grid(row=next_row, column=0, columnspan=3,
+                               sticky="w", pady=(4, 0))
 
     def _play_choice(self, key: str) -> None:
         """Preview the selected clip, so levels can be judged before a break."""
         name = self._clip_by_label.get(self._vars[key].get(), "")
         if name:
             sounds.play(sounds.sounds_dir() / name)
+
+    def _download_pack(self) -> None:
+        """Fetch the curated clips straight from pixabay.com.
+
+        Never shipped in the repo — see ATTRIBUTION.md — so this is the
+        only route to them beyond grabbing the links by hand.
+        """
+        if self._pack_button is not None:
+            self._pack_button.configure(state="disabled")
+        self._pack_status.configure(
+            text="Downloading from pixabay.com…", foreground="#555")
+
+        def work() -> None:
+            # Off the UI thread: a slow or hanging fetch must not freeze
+            # the window.
+            results = sound_pack.download_all()
+            self._root.after(0, lambda: self._finish_pack_download(results))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _finish_pack_download(
+        self, results: list[tuple[sound_pack.Clip, bool, str]]
+    ) -> None:
+        ok = sum(1 for _clip, success, _msg in results if success)
+        failed = [(clip, msg) for clip, success, msg in results if not success]
+        if failed:
+            detail = "; ".join(f"{clip.filename}: {msg}" for clip, msg in failed)
+            text, colour = f"{ok} of {len(results)} downloaded — {detail}", "#b3261e"
+        elif ok:
+            text = f"Downloaded {ok} clip{'s' if ok != 1 else ''}."
+            colour = "#1b6b2f"
+        else:
+            text, colour = "Already had every clip in the starter pack.", "#555"
+        self._sounds_frame.destroy()
+        self._build_sounds(self._sounds_parent, self._sounds_row)
+        self._pack_status.configure(text=text, foreground=colour)
 
     def _build_focus(self, parent, row):
         frame = _section(parent, row, "Focus Mode")
@@ -415,6 +479,24 @@ class SetupDialog:
         self._root.geometry(
             f"+{(screen_w - width) // 2}+{max(0, (screen_h - height) // 3)}"
         )
+        self._bring_to_front()
+
+    def _bring_to_front(self) -> None:
+        """Force this window above whatever currently has focus.
+
+        The app's own root is withdrawn — there is no visible main window,
+        just a tray icon — so Windows' focus-stealing prevention treats a
+        freshly opened Toplevel as a background window and leaves it behind
+        whatever the user was looking at. A brief topmost flip is the usual
+        workaround: it doesn't need the foreground-switch permission that
+        `focus_force` alone can be denied, and is released right after so
+        the window doesn't stay pinned above everything else forever.
+        """
+        self._root.deiconify()
+        self._root.lift()
+        self._root.attributes("-topmost", True)
+        self._root.after(150, lambda: self._root.attributes("-topmost", False))
+        self._root.focus_force()
 
     def run(self) -> Settings | None:
         if self._owns_root:

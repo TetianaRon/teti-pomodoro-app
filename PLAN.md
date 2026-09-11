@@ -17,15 +17,93 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 
 ## Handoff — start here in a fresh session
 
-**State: all 8 phases complete and in daily use.** 416 tests, pyflakes clean,
-`main` clean and pushed. The app runs from a Startup shortcut at login; there is
-no build step. No skill is required to work on this project — see `CLAUDE.md`'s
-session practices.
+### In progress: a 9-item feedback batch, checkpoint 2 of 4 done
+
+Tetiana filed 9 feedback items in one sitting (2026-08-22) covering the
+meeting/timer/skip interaction, overwork behaviour, a daily-cap warning, and
+three standalone bugs. Given the size, it's split into 4 independent
+checkpoints — each its own explore → implement → test → commit → doc-update
+cycle — so a session boundary anywhere below loses nothing already landed.
+
+**Checkpoint 1 — meeting/skip/timer redesign — done, committed `b58e219`.**
+See the "2026-08-22" Session Worklog entry below and `docs/SPEC.md` §3–4B for
+the full account. Covered: the work interval no longer freezes during a
+meeting (only the lock itself is held off); a break already due when a
+meeting ends waits `Config.post_meeting_break_delay` before firing; a break
+bleeding into a meeting is free to skip; skipping after
+`Config.break_skip_complete_after` (5 min) rested counts the break as taken
+via the new `PomodoroEngine.complete_break()`, instead of restarting the long
+break via `defer_break()`. **Not yet watched against a real calendar feed and
+lock screen** — see "Unverified on hardware" below.
+
+**Checkpoint 2 — overwork/Emergency-Mode skip rules — done, see the
+"2026-08-22" Session Worklog entry below (second one) and `docs/SPEC.md` §5,
+§4B.** Covered: `timer.py`'s `_break_duration()` now returns a fixed
+`Config.overtime_break_duration` (10 min) whenever `self.overtime` is set,
+regardless of `_break_is_long`; a new, separate `AppState.overtime_skip_used`
+budget (`Config.overtime_skip_daily_budget`, 15 min) with its own
+`overtime_skip_remaining`/`can_skip_overtime`/`with_overtime_skip` gives
+overtime skips a 5-minute-only menu (`Config.overtime_skip_options`) instead
+of the ordinary 5/10/20 at 60 min/day; `app.py`'s `_skip_offer()`/
+`_take_skip()` branch on `self.engine.overtime` to pick which
+options/budget/state-method apply, independent of checkpoint 1's
+`free`/`complete` rules, which still apply on top either way (a meeting is
+still a meeting during overtime). **Not verified against the app.py wiring
+on hardware** — the new state-machine and budget behaviour is engine/state
+tested, but `_skip_offer()`/`_take_skip()`'s branching itself was not pulled
+into a testable free function the way checkpoint 1's `skip_terms()` was, so
+it has no direct test coverage; only a live lock screen past the daily cap
+would exercise it.
+
+**Checkpoint 3 — 10-minute pre-daily-cap warning — next, not started.** Mirror the
+existing 2-minute break warning (`Config.warning_lead`, the `WarningBanner`/
+`CountdownPill` pair in `pill.py`) but keyed off `CapStatus.remaining_seconds`
+reaching 10 minutes instead of off the work interval. In that final 10-minute
+window, **regular breaks should be suppressed** so the day's work can finish
+uninterrupted. Open design questions to resolve before writing code (not yet
+asked of the contributor): does suppression cover long breaks too, or only
+the ordinary short ones; how this interacts with Emergency Mode (does
+activating it clear the suppression along with raising the cap, since the
+10-minute window was measured against the cap that just moved); and whether
+this reuses `timer.py`'s existing `suppress_breaks` flag (Focus Mode's
+mechanism) or needs its own, since Focus Mode's is a *user-invoked, capped*
+override and this would be automatic and daily.
+
+**Checkpoint 4 — three standalone bug fixes — not started, not yet explored.**
+- **Media pause doesn't work.** SPEC §2 documents the mechanism:
+  `VK_MEDIA_PLAY_PAUSE` sent just before input suppression starts, gated by
+  an `is_audio_playing()` peak-level check that ignores this app's own pid.
+  Note `Config.pause_media_on_lock` defaults to **False** — check first
+  whether the contributor has it enabled locally (it wouldn't fire at all
+  otherwise) before assuming the audio-detection path itself is broken.
+  `M` on the lock screen is the manual fallback and is *also* reported
+  unverified on hardware (see below) — establish which of the two paths
+  (automatic vs. manual `M`) is the one that's actually failing before
+  changing anything.
+- **Walking-reminder window is mispositioned.** Likely `walking.WalkPrompt`
+  not applying the same multi-monitor / negative-x-offset geometry handling
+  that `pill.py`/`overlay.py` already had to fix (see PLAN.md's Session
+  Worklog, 2026-08-11 pill entries) — the contributor's second monitor sits
+  at a negative x-offset, which has caused this exact class of bug before.
+- **The 2-minute warning countdown visibly lags.** Look at `pill.py`'s
+  seconds-driven countdown (PLAN.md notes the countdown pill normally only
+  redraws once a minute, but "the warning does tick seconds") — check
+  redraw cost and `after()` scheduling drift against the 1s app tick.
+
+Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
+none of these three have had their code located yet.
+
+**State: all 8 phases complete and in daily use.** 441 tests, pyflakes clean,
+working tree clean, `teti-laptop` pushed and tracking `origin/teti-laptop`
+(9 commits ahead of `origin/main`, which hasn't moved since this branch's
+merge-base — no PR opened yet, that's a separate step if/when wanted). The
+app runs from a Startup shortcut at login; there is no build step. No skill
+is required to work on this project — see `CLAUDE.md`'s session practices.
 
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 416 tests
+.venv\Scripts\python.exe -m pytest tests                 # 441 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -56,12 +134,33 @@ reporting what happens** — which is how the last dozen commits were found. The
 numbers are all still guesses: 12h cap, 50 min walking, 25/5, 11:45/15:20
 reminders, 90s input gap, 1.4s banner hold.
 
-### Unverified on hardware (the only outstanding risk)
+### Unverified on hardware
 The lock screen's **`M` (media) and `W` (stop treadmill timer)** keys share one
 key-routing path and neither has run for real. `local/checkmedia.py` exercises
 `M`; start a walk from the tray first and one lock covers both. `M` also lifts
 keyboard suppression for a few milliseconds — the script reports whether it
 came back intact, which is the failure that would matter.
+
+**Also unverified (2026-08-22):** the meeting/skip redesign — a break
+bleeding into a real meeting reads as free-to-skip, and a break already due
+waits `post_meeting_break_delay` after the call ends rather than firing
+instantly. Both are engine-level tested but have not been watched against a
+real calendar feed and a real lock screen yet.
+
+**Also unverified (2026-08-22, checkpoint 2):** the overwork skip menu
+actually showing 5-minute-only options once the daily cap is reached, its
+"over the cap" note text, and a real overwork break actually locking for the
+fixed 10 minutes rather than the ordinary short/long duration — all engine-
+and state-level tested, none watched on a real lock screen at end of a long
+day yet.
+
+**Also unverified (2026-08-22, hold-caption fix):** whether the bottom
+caption actually visibly counts down while holding real Escape against a
+real lock. The mechanism-level claim (the menu has always timed off the
+press, not the release) is confirmed by reading the code and by tests; the
+UX diagnosis (three seconds of silence was being misread as "needs a
+release") is a plausible explanation, not a confirmed root cause — see the
+"2026-08-22 — the skip-menu hold" Session Worklog entry.
 
 ### Two habits that account for most bugs found
 1. **Assert on the rendered result, not the requested one.** Geometry checks
@@ -163,6 +262,173 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-08-22 — the skip-menu hold now shows it's working before the 3 seconds are up
+
+Reported outside the 4-checkpoint feedback batch: holding Escape to open the
+skip menu felt like the options only appeared once you *released* the key.
+Reading the mechanism said otherwise — both the global hook path
+(`InputSuppressor._on_press` in `overlay.py`) and the local tkinter fallback
+(`_start_local_hold`) arm their timer on the **press**, independent of
+release, exactly as intended. Asked whether to keep that hold-based gesture
+(fixing whatever made it read as release-gated) or drop it for a plain
+Escape tap; **kept the 3s hold** — it's the friction that makes the skip "a
+deliberate act, not a casual one," per §4B's own reasoning for why it was
+never a plain unlock.
+
+**The likely cause: three full seconds of total silence.** Nothing on
+screen acknowledged a hold was even registered until either the menu
+appeared or you gave up and let go — which, held long enough out of
+uncertainty, would make the menu's actual appearance line up with whenever
+you happened to release, making it look causally tied to release when it
+never was. No reproducible timing bug was found in the mechanism itself
+(covered by an existing test, `test_auto_repeat_does_not_push_the_hold_deadline_back`);
+this is a UX-silence diagnosis, not a confirmed root cause, and can only
+really be settled by holding the key on a real machine and watching what
+happens.
+
+**Fix: the bottom caption now counts down live.** `LockOverlay` tracks
+`_hold_started_at`, set the instant the *first* keydown of a hold is seen
+(`_drain()`'s `"key"` branch, guarded so auto-repeat doesn't keep resetting
+it) and cleared on early release or once the menu opens. Each `tick()`
+(the same 1s cadence everything else in the lock already runs on) computes
+`_hold_progress_caption()` and swaps the resting "hold Esc for 3s to skip
+this break" caption for "still holding — opening in Ns", counting down
+until the menu takes over or the key is let go. `_open_menu()` explicitly
+resets the caption the instant it opens, so it can't freeze mid-countdown
+behind the now-open menu.
+
+**Verified:** 441 tests (6 new in `tests/test_cosmetic_lock.py` — hold-start
+tracking, auto-repeat not resetting it, early-release clearing it, and the
+caption's text at each stage, the last driven by monkeypatching
+`overlay.time.monotonic` since the countdown needs a controllable clock),
+pyflakes clean. **Not verified on hardware** — this is exactly the class of
+timing/input behaviour this project's own "Two habits" note says is
+invisible to review and needs a real keyboard; run `local/checklock.py` or
+just hold Escape against a real lock and watch the bottom caption move.
+
+### 2026-08-22 — overwork skips got their own tiny budget, and overwork breaks stopped varying in length
+
+Second of the four checkpoints in the 2026-08-22 feedback batch (checkpoint
+2 of 4 — see the Handoff section above). Both asks share one premise:
+overtime is supposed to feel different from an ordinary day, and two paths
+still behaved identically to the ordinary rhythm even after the day's cap
+was reached.
+
+**Custom skips during overtime now offer only a 5-minute option, capped at
+15 minutes total for the day** — a new, separate `AppState.overtime_skip_used`
+budget (`Config.overtime_skip_daily_budget`), entirely apart from the
+ordinary 60-min `custom_skip_used` pool. Rationale, in the contributor's own
+words: an unrestricted skip once the cap is already reached just extends the
+work day another hour, defeating the point of having reached the cap at all.
+`app.py`'s `_skip_offer()`/`_take_skip()` now branch on `self.engine.overtime`
+to pick which options/budget/state-method apply — `Config.overtime_skip_options`
+and `Config.overtime_skip_daily_budget` in place of the ordinary
+`custom_skip_options`/`custom_skip_daily_budget`. This sits *underneath*
+checkpoint 1's `free`/`complete` rules rather than replacing them: a break
+bleeding into a meeting, or one already rested through, is still free
+regardless of whether the day is over its cap — a meeting is still a
+meeting during overtime, and there's nothing to charge for a break already
+taken.
+
+**Every overwork break is now a fixed 10 minutes**, short or long cycle
+alike. `timer.py`'s `_break_duration()` only ever branched on
+`_break_is_long`; it now checks `self.overtime` first and returns the new
+`Config.overtime_break_duration` unconditionally when set, meant to read as
+"wrap up" rather than as an ordinary break of whatever length the cycle
+count would otherwise have produced.
+
+**What this built on, confirming the handoff's read of the code:**
+`Config.overtime_work_duration`/`overtime_warning_lead` already shortened
+the work interval past the cap, and `caps.py`'s `CapStatus.over` (mirrored
+onto `self.engine.overtime` every tick in `app.py`'s `_update_cap()`) was
+already the right signal to key off — no changes needed in `caps.py`.
+`app.py`'s Emergency Mode section (`_emergency_option`/`_take_emergency`)
+turned out to be untouched by this checkpoint: it operates on a separate
+weekly-hours budget and is offered by the same skip menu, but doesn't
+interact with which *skip durations* are on offer.
+
+**Declared, not silently folded in:** `_skip_offer()`/`_take_skip()`'s
+branching logic was not extracted into a standalone testable function the
+way checkpoint 1 pulled `skip_terms()` out of `Application` — the new
+per-budget behaviour is fully covered at the `timer.py`/`state.py` level
+(fixed break length, the new budget's independence from the ordinary one,
+its own rollover), but the app.py wiring that picks between them is glue
+code with no direct test, matching how `_emergency_option`/`_take_emergency`
+were already untested this way. `--doctor` gained a second budget line
+(`overtime skip left today`) for symmetry with the existing one.
+
+**Verified:** 435 tests (7 new — `tests/test_timer.py` gained
+`test_overtime_shortens_the_work_interval` (this codepath, `engine.overtime`
+shortening `work_duration()`, previously had no direct test at all) and two
+fixed-break-length cases; `tests/test_skips.py` and
+`tests/test_state_budgets.py` gained the overtime-budget independence,
+exhaustion and rollover/round-trip cases), pyflakes clean. **Not verified on
+hardware** — see "Unverified on hardware" above.
+
+### 2026-08-22 — the timer stopped freezing during meetings, and skips stopped restarting the long break
+
+First of a batch of feedback items (this repo's normal mode now — see "The
+work now is feedback-driven" above). This sitting covers the three most
+tangled ones together, since they share the same code paths: the meeting
+timer/skip redesign (checkpoint 1 of 4). The other three — overwork skip
+caps, a 10-min pre-cap warning window, and three standalone bug fixes (media
+pause, walking-reminder position, warning-pill lag) — are separate sessions.
+
+**The interval no longer freezes during a meeting.** It used to: an
+exclusion held `_work_elapsed` exactly where it was for the whole call, on
+the reasoning that "hold the break off" and "freeze the countdown" were the
+same thing. They never were — `worked_total` was already fixed to advance
+during a call on 2026-08-11 for exactly this reason, and the interval simply
+never got the same treatment. The symptom: a 40-minute meeting sitting on a
+25-minute interval left the countdown reading whatever it had when the call
+started, so a break overdue by 15 minutes the moment the call ended looked
+freshly begun. Now `_work_elapsed` advances by tick-delta through a call
+exactly like `worked_total` does; only actually raising the lock stays held
+off, via a new `_check_work_thresholds` helper both the normal tick and the
+excluded path call into. See `docs/SPEC.md` §3.
+
+**A break already due when the meeting ends now waits a beat before
+firing** — `Config.post_meeting_break_delay` (default 5 min, 0 for
+immediate) — rather than locking the instant the call clears, so there's a
+moment to write down what just got decided. Only holds off a break that was
+*already* waiting; one that becomes due later is unaffected.
+
+**A break that bleeds into a meeting is free to skip.** The existing
+10-minute meeting lead only stops a break from *starting* late; it doesn't
+stop one that had already started from *running into* the meeting — a
+15-minute long break starting 11 minutes early isn't covered by a 10-minute
+lead and lands 4 minutes into the call. Rather than auto-cutting the break
+(keeping §3's "a break already locked runs its course" as the default), the
+skip menu now waives its usual 60-min/day budget whenever a meeting
+exclusion is active at the moment of skipping.
+
+**Skipping after resting ≥5 minutes now counts the break as taken, not
+deferred.** Reported live: a 15-min break, 10 minutes actually rested, then
+skipped for an urgent message — and the *next* break arrived as another full
+15-min long break, because `defer_break()` deliberately never advances the
+cycle count (a skip isn't a taken break), so the unchanged count made the
+4th-cycle arithmetic recompute "long" again. Below
+`Config.break_skip_complete_after` (5 min), nothing changes: `defer_break`
+still spends budget and buys back the chosen minutes. At or past it, a new
+`PomodoroEngine.complete_break()` path advances the cycle and resumes on a
+full fresh interval instead — free, since there's nothing left to buy back.
+This is also where the meeting free-skip and the rest-complete rule overlap
+in practice: a break far enough into a meeting has usually also cleared 5
+minutes rested, so `app.py`'s new `skip_terms()` computes both independently
+and either alone waives the budget.
+
+**Verified:** 428 tests (12 new — `tests/test_skips.py` gained engine
+coverage for `complete_break()` and the pure `skip_terms()` decision
+function, `tests/test_meeting_time.py` gained the post-meeting-delay cases),
+pyflakes clean. `skip_terms()` was deliberately pulled out of `Application`
+into a free function in `app.py` so it's testable without constructing a
+live `Application` (tkinter root, calendar watcher, sound resolution) —
+nothing in the test suite does that today, and this logic didn't need to be
+the first. **Not verified on hardware**: the free/complete skip menu text
+and the post-meeting delay haven't been watched against a real calendar
+feed and a real lock screen yet — flagged the same way the existing `M`/`W`
+key handling already is in the Handoff section above.
 
 ### 2026-08-11 — the tray would have killed the app on her first real launch
 

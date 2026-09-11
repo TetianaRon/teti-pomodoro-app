@@ -6,6 +6,14 @@ Five bell clips from [Pixabay](https://pixabay.com/), used as the break
 start/end chimes. They live in `assets/sound-effects/`, which is
 **gitignored** — see the warning below for why.
 
+**Not shipped — fetched on request.** The Settings window has a "Download
+starter pack" button (`pomodoro_guardian/sound_pack.py`) that pulls these
+five files straight from Pixabay's CDN to `assets/sound-effects/` on the
+user's own machine. Only the source URLs are checked into the repo, same as
+a bookmark would be; the files themselves never pass through this repo or
+anything it publishes, so the redistribution clause below doesn't apply to
+them the way it would to committing the mp3s directly.
+
 **Attribution is not required.** The Pixabay Content License says you may
 "use Content without having to attribute the author (although giving credit is
 always appreciated by our community!)". These are credited voluntarily, and

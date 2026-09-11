@@ -57,6 +57,18 @@ class Config:
     # almost half the time.
     overtime_warning_lead: float = 1 * MINUTE
     emergency_grant_hours: float = 1.0
+    # Overwork breaks are a fixed length regardless of where the cycle
+    # count would otherwise put a short or long break — meant to read as
+    # "wrap up," not as an ordinary break.
+    overtime_break_duration: float = 10 * MINUTE
+    # Once the cap is already reached, a skip is not the ordinary 60-min
+    # budget at 5/10/20 min: it's 5-minute-only, capped at 15 min/day
+    # total. An unrestricted skip during overtime just extends the work
+    # day another hour, defeating the point of having reached the cap at
+    # all. Separate from custom_skip_daily_budget/custom_skip_options,
+    # which stop applying once overtime starts.
+    overtime_skip_options: tuple[float, ...] = (5 * MINUTE,)
+    overtime_skip_daily_budget: float = 15 * MINUTE
 
     # --- Custom break skip (SPEC §4B) ---
     # Fixed choices, offered by the hold-Escape menu against the lock. All
@@ -65,6 +77,12 @@ class Config:
     # reads as a limit rather than a broken key.
     custom_skip_options: tuple[float, ...] = (5 * MINUTE, 10 * MINUTE, 20 * MINUTE)
     custom_skip_daily_budget: float = 60 * MINUTE
+    # A break skipped after at least this much of it was actually rested
+    # counts as taken rather than deferred (SPEC §4B): the cycle advances
+    # and the next work interval starts fresh, instead of the same break
+    # coming due again a few minutes later. Below this threshold a skip
+    # still spends the daily budget and buys back exactly the chosen time.
+    break_skip_complete_after: float = 5 * MINUTE
 
     # --- Never-interrupt exclusions (SPEC §3) ---
     # Whether time on a call counts towards the daily cap. It is work, and
@@ -90,6 +108,11 @@ class Config:
     # usually an app holding the mic open rather than a real six-hour call.
     # Only warns; it does not override the exclusion.
     exclusion_warn_after: float = 2 * 60 * MINUTE
+    # A break already due when a meeting ends doesn't fire the instant the
+    # meeting clears — that's no time to wrap up notes from the call. Set to
+    # 0 for "immediately"; either way this only holds off a break that was
+    # already waiting, never one that becomes due later.
+    post_meeting_break_delay: float = 5 * MINUTE
 
     # --- Detection (SPEC §2.1) ---
     # How long a pause still counts as being at the desk. Covers keyboard
@@ -182,6 +205,8 @@ class Config:
             start_threshold=self.start_threshold / factor,
             idle_pause_after=self.idle_pause_after / factor,
             idle_reset_after=self.idle_reset_after / factor,
+            post_meeting_break_delay=self.post_meeting_break_delay / factor,
+            break_skip_complete_after=self.break_skip_complete_after / factor,
         )
 
 

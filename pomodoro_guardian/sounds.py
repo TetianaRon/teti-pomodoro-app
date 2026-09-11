@@ -22,6 +22,8 @@ import sys
 import threading
 from pathlib import Path
 
+from . import runtime
+
 _alias = itertools.count(1)
 
 EXTENSIONS = (".mp3", ".wav", ".m4a", ".wma")
@@ -39,6 +41,20 @@ def assets_dir() -> Path:
 
 
 def sounds_dir() -> Path:
+    """Where clips are looked for, played, and saved.
+
+    Repo-relative when running from source, matching the README's "drop
+    files into assets/sound-effects/" instructions. A packaged build has
+    no repo to be relative to: PyInstaller's onefile mode extracts
+    `__file__` into a temp folder deleted when the process exits, so
+    anything saved there — including a starter-pack download — would
+    vanish the moment the app closes. Frozen mode uses the same
+    persistent %APPDATA% folder as settings, history and the log instead.
+    """
+    if runtime.frozen():
+        from .settings import default_path
+
+        return default_path().parent / SOUNDS_DIRNAME
     return assets_dir() / SOUNDS_DIRNAME
 
 

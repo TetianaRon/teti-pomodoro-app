@@ -16,6 +16,7 @@ rather than a reminder:
 
 from __future__ import annotations
 
+from pomodoro_guardian import overlay as overlay_module
 from pomodoro_guardian.config import MINUTE, Config
 from pomodoro_guardian.overlay import (
     InputSuppressor,
@@ -187,6 +188,116 @@ def test_no_hold_is_timed_when_the_safety_release_is_off():
 
     assert overlay._local_hold is None
     assert overlay.root.jobs == {}
+
+
+# -- live feedback during the hold, not only on release (2026-08-22) ----
+#
+# Reported: the skip menu appeared to need a *release* to show up. It
+# never did — the timer that opens it has always been keyed off the press,
+# not the release (see the InputSuppressor/threading.Timer path this local
+# one mirrors) — but nothing acknowledged the hold on screen for the full
+# 3 seconds it takes, which reads exactly like it does.
+
+
+class _FakeLabel:
+    """Enough of a tk.Label to assert on for a caption's text."""
+
+    def __init__(self) -> None:
+        self.text = ""
+
+    def cget(self, _key):
+        return self.text
+
+    def configure(self, text=None, **_kwargs):
+        if text is not None:
+            self.text = text
+
+
+def test_the_hold_progress_starts_on_the_first_press():
+    overlay = Overlay()
+    assert overlay._hold_started_at is None
+
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+
+    assert overlay._hold_started_at is not None
+
+
+def test_auto_repeat_does_not_restart_the_hold_progress():
+    """Mirrors test_auto_repeat_does_not_push_the_hold_deadline_back: the
+    same flood of repeat keydowns must not keep resetting the caption's
+    clock either, or it would never count down at all."""
+    overlay = Overlay()
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+    first = overlay._hold_started_at
+
+    for _ in range(20):
+        overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+
+    assert overlay._hold_started_at == first
+
+
+def test_releasing_before_the_hold_completes_clears_the_progress():
+    overlay = Overlay()
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+    assert overlay._hold_started_at is not None
+
+    overlay._local_key_release(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+
+    assert overlay._hold_started_at is None
+
+
+def test_the_caption_counts_down_while_still_held(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(overlay_module.time, "monotonic", lambda: clock[0])
+
+    overlay = Overlay()
+    label = _FakeLabel()
+    overlay._hold_captions = [label]
+
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+    clock[0] += 1.0
+    overlay.tick(60.0)
+
+    assert "2s" in label.text, label.text
+
+
+def test_the_caption_reverts_once_the_menu_opens():
+    """Otherwise it freezes on '...opening in 1s' for as long as the menu
+    stays open, since tick() stops refreshing it once _menu_open is set."""
+    overlay = Overlay()
+    label = _FakeLabel()
+    overlay._hold_captions = [label]
+
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay.root.fire(overlay._local_hold)
+    overlay._drain()
+
+    assert overlay._menu_open
+    assert "hold Esc" in label.text
+    assert "opening in" not in label.text
+
+
+def test_the_caption_reverts_when_released_early():
+    overlay = Overlay()
+    label = _FakeLabel()
+    overlay._hold_captions = [label]
+
+    overlay._local_key_press(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+    overlay.tick(60.0)
+    assert "opening in" in label.text
+
+    overlay._local_key_release(Event(char="\x1b", keysym="Escape"))
+    overlay._drain()
+    overlay.tick(60.0)
+
+    assert "opening in" not in label.text
 
 
 def test_unprintable_characters_are_not_passed_on_as_text():

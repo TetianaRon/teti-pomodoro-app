@@ -60,6 +60,12 @@ class AppState:
     day: date
     # --- daily ---
     custom_skip_used: float = 0.0      # seconds (SPEC §4B)
+    # A separate, much smaller budget that applies once the day is over
+    # its cap: unrestricted skips during overtime would just extend the
+    # work day another hour (SPEC §5). Kept apart from custom_skip_used
+    # so the ordinary 60-min budget is untouched by overtime spending and
+    # vice versa.
+    overtime_skip_used: float = 0.0    # seconds (SPEC §5)
     worked_today: float = 0.0          # seconds of tracked work
     day_type_override: str | None = None   # WORKING / NON_WORKING / None
     walked_today: float = 0.0          # seconds on the treadmill (SPEC §7)
@@ -128,6 +134,19 @@ class AppState:
 
     def with_skip(self, seconds: float) -> "AppState":
         return replace(self, custom_skip_used=self.custom_skip_used + seconds)
+
+    # -- the overtime skip budget (SPEC §5) ----------------------------
+
+    def overtime_skip_remaining(self, daily_budget: float) -> float:
+        return max(0.0, daily_budget - self.overtime_skip_used)
+
+    def can_skip_overtime(self, seconds: float, daily_budget: float) -> bool:
+        return seconds <= self.overtime_skip_remaining(daily_budget)
+
+    def with_overtime_skip(self, seconds: float) -> "AppState":
+        return replace(
+            self, overtime_skip_used=self.overtime_skip_used + seconds
+        )
 
     # -- work tracking (SPEC §5) --------------------------------------
 
@@ -322,6 +341,7 @@ class AppState:
             "version": SCHEMA_VERSION,
             "day": self.day.isoformat(),
             "custom_skip_used_seconds": self.custom_skip_used,
+            "overtime_skip_used_seconds": self.overtime_skip_used,
             "worked_today_seconds": self.worked_today,
             "day_type_override": self.day_type_override,
             "walked_today_seconds": self.walked_today,
@@ -359,6 +379,7 @@ class AppState:
         stored = cls(
             day=day,
             custom_skip_used=_seconds(data, "custom_skip_used_seconds"),
+            overtime_skip_used=_seconds(data, "overtime_skip_used_seconds"),
             worked_today=_seconds(data, "worked_today_seconds"),
             day_type_override=_override(data.get("day_type_override")),
             walked_today=_seconds(data, "walked_today_seconds"),

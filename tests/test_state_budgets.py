@@ -159,7 +159,10 @@ def test_work_accumulates_and_ignores_negative_deltas():
 def test_everything_round_trips_through_a_file(tmp_path):
     path = tmp_path / "state.json"
     original = (
-        AppState(day=MONDAY, worked_today=4 * HOUR, custom_skip_used=600)
+        AppState(
+            day=MONDAY, worked_today=4 * HOUR, custom_skip_used=600,
+            overtime_skip_used=300,
+        )
         .with_emergency(1.0, NOON)
         .with_override(WORKING)
     )
@@ -169,6 +172,7 @@ def test_everything_round_trips_through_a_file(tmp_path):
 
     assert restored.worked_today == 4 * HOUR
     assert restored.custom_skip_used == 600
+    assert restored.overtime_skip_used == 300
     assert restored.day_type_override == WORKING
     assert restored.emergency_hours_today() == 1.0
     assert restored.raises_used_this_month() == 1
@@ -177,7 +181,10 @@ def test_everything_round_trips_through_a_file(tmp_path):
 def test_a_new_day_keeps_rolling_budgets_but_clears_daily_ones(tmp_path):
     path = tmp_path / "state.json"
     save(
-        AppState(day=MONDAY, worked_today=9 * HOUR, custom_skip_used=1200)
+        AppState(
+            day=MONDAY, worked_today=9 * HOUR, custom_skip_used=1200,
+            overtime_skip_used=900,
+        )
         .with_emergency(1.0, NOON)
         .with_override(NON_WORKING),
         path,
@@ -187,6 +194,7 @@ def test_a_new_day_keeps_rolling_budgets_but_clears_daily_ones(tmp_path):
 
     assert tomorrow.worked_today == 0
     assert tomorrow.custom_skip_used == 0
+    assert tomorrow.overtime_skip_used == 0
     assert tomorrow.day_type_override is None
     assert tomorrow.emergency_remaining(3.0, NOON + timedelta(days=1)) == 2.0
 

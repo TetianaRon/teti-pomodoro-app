@@ -81,8 +81,14 @@ def test_a_call_stops_the_break_from_arriving():
     assert h.engine.snapshot().excluded
 
 
-def test_the_countdown_freezes_rather_than_running_on():
-    """SPEC §3: 'an in-progress countdown pauses'."""
+def test_the_countdown_keeps_running_during_a_call():
+    """Redesigned 2026-08-22: only the lock freezes, not the interval.
+
+    Time on a call already counts as work (see test_meeting_time.py), so
+    the countdown to the *next* break now advances through a call exactly
+    as it would through ordinary work — a meeting that runs long no longer
+    looks identical to the rhythm having quietly stalled.
+    """
     h = Harness()
     h.advance_until(Event.WORK_STARTED, limit=200)
     remaining_before = h.engine.snapshot().remaining
@@ -91,8 +97,8 @@ def test_the_countdown_freezes_rather_than_running_on():
     h.advance(600, active=True)
 
     assert h.engine.snapshot().remaining == pytest.approx(
-        remaining_before, abs=2.0
-    ), "work accrued during a call"
+        remaining_before - 600, abs=2.0
+    ), "the interval did not advance during the call"
 
 
 def test_the_countdown_resumes_where_it_left_off():
@@ -131,14 +137,16 @@ def test_a_long_call_does_not_abandon_the_session():
 
 
 def test_the_break_arrives_once_the_call_ends():
-    h = Harness()
+    """No post-meeting delay configured: the break fires the moment the
+    call clears. (See test_meeting_time.py for the delay itself.)"""
+    h = Harness(Config(post_meeting_break_delay=0))
     h.advance_until(Event.WARNING_STARTED, limit=2000)
     h.excluded = True
     h.advance(600, active=True)
     assert h.state is State.WARNING, "should still be waiting, not locked"
 
     h.excluded = False
-    h.advance_until(Event.BREAK_STARTED, limit=300)
+    h.advance_until(Event.BREAK_STARTED, limit=10)
 
     assert h.state is State.BREAK
 
@@ -181,18 +189,25 @@ def test_a_break_already_locked_runs_its_course():
     assert h.engine.completed_cycles == 1
 
 
-def test_time_on_a_call_is_never_retroactively_credited():
-    """The watermark must not pay out the call's duration on resume."""
+def test_time_on_a_call_is_never_credited_twice():
+    """The interval is credited as the call runs now (2026-08-22), so the
+    watermark must not pay the same minutes out a second time on resume."""
     h = Harness()
     h.advance_until(Event.WORK_STARTED, limit=200)
     remaining_before = h.engine.snapshot().remaining
 
     h.excluded = True
-    h.advance(1800, active=False)   # half an hour, no typing
+    h.advance(400, active=False)   # a partial call, no typing
+    remaining_during = h.engine.snapshot().remaining
+    assert remaining_during == pytest.approx(remaining_before - 400, abs=2.0)
+
     h.excluded = False
     h.advance(1, active=True)       # first keystroke back
 
-    assert h.engine.snapshot().remaining >= remaining_before - 3.0
+    # Only the one new second is credited — not the 400s of call time again.
+    assert h.engine.snapshot().remaining == pytest.approx(
+        remaining_during - 1, abs=2.0
+    )
 
 
 # -- detectors --------------------------------------------------------

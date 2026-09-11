@@ -168,16 +168,20 @@ def test_the_break_arrives_immediately_once_focus_ends():
     assert Event.BREAK_STARTED in h.events
 
 
-def test_an_exclusion_still_freezes_the_interval_during_focus():
-    """A call still holds the break off, whatever else is running.
+def test_an_exclusion_during_focus_still_advances_the_interval():
+    """A call still holds the *break* off, whatever else is running — but
+    the interval itself does not freeze, any more than worked_total does.
 
-    This test used to assert the opposite of its second half — that no work
-    accrued during a call either — which was the bug found on 2026-08-11: an
-    82-minute meeting credited zero seconds and the daily cap could be
-    walked straight past. Focus Mode's own docstring had the right rule all
-    along ("work accrues as normal here — only the break is held back"); it
-    simply had not been applied to exclusions. Both now behave the same way,
-    which is the point.
+    This test used to assert the opposite of its second half: that neither
+    work nor the interval advanced during a call, which was two separate
+    bugs found on different days. The first (2026-08-11) was that an
+    82-minute meeting credited zero seconds towards the daily cap — fixed
+    by making worked_total advance during an exclusion exactly as Focus
+    Mode's own docstring already said it should ("work accrues as normal
+    here — only the break is held back"). The second (2026-08-22) was that
+    the *interval* — the countdown to the next break — was still frozen,
+    so a meeting that ran long looked identical to the rhythm having
+    stalled. Both now follow the same rule.
     """
     h = Harness()
     h.advance_until(Event.WORK_STARTED, limit=200)
@@ -189,5 +193,5 @@ def test_an_exclusion_still_freezes_the_interval_during_focus():
         h.now += 1
         h.engine.update(h.now, h.last_input, excluded=True)
 
-    assert h.engine.snapshot().remaining == remaining, "the break advanced"
+    assert h.engine.snapshot().remaining == pytest.approx(remaining - 60, abs=2)
     assert h.engine.worked_total - before == pytest.approx(60, abs=2)
