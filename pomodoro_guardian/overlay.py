@@ -369,6 +369,10 @@ class LockOverlay:
         self._walk_state = walk_state
         self._on_stop_walk = on_stop_walk
         self._windows: list[tk.Toplevel] = []
+        # The monitor layout the windows were built for, and what they say,
+        # so they can be rebuilt if a screen is unplugged mid-break.
+        self._layout: list[tuple[int, int, int, int]] = []
+        self._lock_args: tuple = ("Break", "", False)
         self._countdowns: list[tk.Label] = []
         self._hints: list[tk.Label] = []
         self._bodies: list[tk.Frame] = []
@@ -432,13 +436,8 @@ class LockOverlay:
 
         self._menu_open = False
         self._hold_started_at = None
-        for rect in monitor_rects(self._root):
-            window, countdown, body = self._build_window(
-                rect, heading, back_at, is_long_break
-            )
-            self._windows.append(window)
-            self._countdowns.append(countdown)
-            self._bodies.append(body)
+        self._lock_args = (heading, back_at, is_long_break)
+        self._build_windows()
 
         self._suppressor = InputSuppressor(
             on_safety_hold=self._safety_hold
@@ -465,6 +464,7 @@ class LockOverlay:
         self._drain()
         if not self._windows:
             return
+        self._follow_layout()
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
         text = f"{minutes:02d}:{seconds:02d}"
         for countdown in self._countdowns:
@@ -518,6 +518,60 @@ class LockOverlay:
         self._hold_started_at = None
 
     # -- internals ----------------------------------------------------
+
+    def _build_windows(self) -> None:
+        """One window per monitor, for the layout as it is right now."""
+        self._layout = monitor_rects(self._root)
+        for rect in self._layout:
+            window, countdown, body = self._build_window(
+                rect, *self._lock_args
+            )
+            self._windows.append(window)
+            self._countdowns.append(countdown)
+            self._bodies.append(body)
+
+    def _follow_layout(self) -> None:
+        """Rebuild the windows if a monitor came or went mid-break.
+
+        Each window is sized for one monitor when the lock goes up. Unplug
+        the main screen during a break and Windows herds that screen's
+        window onto the laptop at its old 1080p size, while the laptop's own
+        window keeps coordinates from a layout that no longer exists —
+        overlapping, oversized, and laid out for the wrong screen (reported
+        2026-10-02). Polled per tick rather than hooked to WM_DISPLAYCHANGE:
+        enumerating monitors is cheap, and a poll also catches the layout
+        settling over a few seconds after a dock is pulled.
+
+        Only the windows are rebuilt. Input suppression, the skip menu and
+        any reminder-only notice carry on as they were.
+        """
+        try:
+            layout = monitor_rects(self._root)
+        except Exception:  # pragma: no cover - keep the lock up regardless
+            return
+        if layout == self._layout:
+            return
+        for window in self._windows:
+            try:
+                window.destroy()
+            except tk.TclError:  # pragma: no cover - already gone
+                pass
+        self._windows = []
+        self._countdowns = []
+        self._hints = []
+        self._hold_captions = []
+        self._bodies = []
+        self._notices = []
+        self._menus = []
+        self._build_windows()
+        if self._menu_open:
+            caption = self._skip_caption()
+            for label in self._hold_captions:
+                label.configure(text=caption)
+            for body in self._bodies:
+                self._menus.append(self._build_menu(body))
+        if not self._suppressing:
+            self._admit_reminder_only()
 
     def _build_window(self, rect, heading, back_at, is_long_break):
         left, top, width, height = rect
@@ -1009,6 +1063,7 @@ class WarningBanner:
         self._root = root
         self._config = config
         self._windows: list[pill.PillWindow] = []
+        self._layout: list[tuple[int, int, int, int]] = []
         self._areas: list[tuple] = []
         self._rects: list[tuple] = []
         self._poll_job: str | None = None
@@ -1030,12 +1085,7 @@ class WarningBanner:
             return
         self._tone = tone
         self._started_at = time.monotonic()
-        self._areas = [
-            pill.work_area(self._root, rect)
-            for rect in monitor_rects(self._root)
-        ]
-        self._windows = [pill.PillWindow(self._root) for _ in self._areas]
-        self._rects = [(0, 0, 0, 0)] * len(self._areas)
+        self._build_windows(monitor_rects(self._root))
         self._hovering = False
         self._draw()
         self._schedule_poll()
@@ -1043,11 +1093,40 @@ class WarningBanner:
 
     def set_text(self, text: str) -> None:
         """Change the message on every screen, keeping each anchored."""
-        if text == self._text:
+        moved = self._follow_layout()
+        if text == self._text and not moved:
             return
         self._text = text
         if self._windows:
             self._draw()
+
+    def _build_windows(self, layout) -> None:
+        self._layout = layout
+        self._areas = [pill.work_area(self._root, rect) for rect in layout]
+        self._windows = [pill.PillWindow(self._root) for _ in self._areas]
+        self._rects = [(0, 0, 0, 0)] * len(self._areas)
+
+    def _follow_layout(self) -> bool:
+        """Rebuild for a monitor that came or went; True if it did.
+
+        The same fault as the lock's (see `LockOverlay._follow_layout`): the
+        per-screen work areas were taken once at `show()`, so unplugging a
+        screen mid-warning left pills placed for a layout that was gone.
+        Checked on every `set_text`, which the app calls each tick while
+        the banner is up — countdown or standing notice alike.
+        """
+        if not self._windows:
+            return False
+        try:
+            layout = monitor_rects(self._root)
+        except Exception:  # pragma: no cover - keep the banner regardless
+            return False
+        if layout == self._layout:
+            return False
+        for window in self._windows:
+            window.hide()
+        self._build_windows(layout)
+        return True
 
     def tick(self, remaining: float) -> None:
         minutes, seconds = divmod(int(max(0.0, remaining) + 0.5), 60)
@@ -1081,6 +1160,7 @@ class WarningBanner:
         self._windows = []
         self._areas = []
         self._rects = []
+        self._layout = []
 
     # -- the attention pass -------------------------------------------
 

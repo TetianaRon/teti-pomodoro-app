@@ -135,6 +135,7 @@ class WalkPrompt:
                       + (f" — {left:.0f} min still owed" if left else " — done"))
             )
         self._window.attributes("-topmost", True)
+        self._anchor(self._window)
 
     def hide(self) -> None:
         if self._window is not None:
@@ -158,13 +159,72 @@ class WalkPrompt:
         if self._on_dismiss is not None:
             self._on_dismiss()
 
-    def _place(self, window: tk.Toplevel) -> None:
-        """Bottom-right of the primary monitor, clear of the break banner."""
-        from .overlay import primary_rect
+    #: Gap to the work area's edge, clear of the corner pill and banner.
+    MARGIN = 32
+    #: Title bar and borders, measured on Windows 11 at 100% (2026-10-02):
+    #: what `winfo_reqwidth/height` leave out. Only a first guess — replaced
+    #: by the real frame once the window is on screen (`_learn_frame`).
+    FRAME = (16, 39)
 
+    def _place(self, window: tk.Toplevel) -> None:
+        """Bottom-right of the primary monitor, inside its work area."""
+        self._frame = self.FRAME
+        self._placed: tuple[int, int] | None = None
+        self._anchor(window)
+        window.after(100, lambda: self._learn_frame(window))
+
+    def _anchor(self, window: tk.Toplevel) -> None:
+        """Keep the bottom-right corner pinned while the content changes size.
+
+        Placed once at `show()`, the window used to grow rightwards off the
+        screen (reported 2026-10-02): `show()` runs with the status line
+        still empty, and the app's `update()` fills it in on the same tick —
+        "0 of 50 min today — 50 min still owed" is wider than anything else
+        in the window — then rewrites it every tick after. Tk grows a window
+        from its top-left, so each wider line pushed the right edge further
+        out. Now any change in size moves the window to match.
+
+        Sized from the requested client size plus the frame, rather than
+        measured, because the requested size is updated the moment text
+        changes while the real window only catches up on a later redraw.
+        """
         window.update_idletasks()
-        left, top, width, height = primary_rect(self._root)
-        margin = 32
-        x = left + width - window.winfo_reqwidth() - margin
-        y = top + height - window.winfo_reqheight() - margin - 40
+        size = (
+            window.winfo_reqwidth() + self._frame[0],
+            window.winfo_reqheight() + self._frame[1],
+        )
+        if size == self._placed:
+            return
+        self._placed = size
+        from .overlay import primary_rect
+        from .pill import corner, work_area
+
+        area = work_area(self._root, primary_rect(self._root))
+        x, y = corner(area, *size, margin=self.MARGIN)
         window.geometry(f"+{x}+{y}")
+
+    def _learn_frame(self, window: tk.Toplevel) -> None:
+        """Swap the guessed frame size for the real one, once it's drawn."""
+        if window is not self._window:
+            return  # hidden, or replaced, since
+        size = outer_size(window)
+        if size is None:
+            return
+        self._frame = (
+            size[0] - window.winfo_width(), size[1] - window.winfo_height()
+        )
+        self._placed = None
+        self._anchor(window)
+
+
+def outer_size(window: tk.Toplevel) -> tuple[int, int] | None:
+    """A mapped window's full size including its frame, or None."""
+    try:
+        import win32gui
+
+        left, top, right, bottom = win32gui.GetWindowRect(
+            int(window.wm_frame(), 16)
+        )
+    except Exception:  # pragma: no cover - non-Windows, or not mapped yet
+        return None
+    return right - left, bottom - top

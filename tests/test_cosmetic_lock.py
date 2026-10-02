@@ -85,6 +85,9 @@ class Overlay(LockOverlay):
         self._menus = []
         self._menu_open = False
 
+    def _follow_layout(self):
+        pass  # the stub windows have no monitors; see test_lock_layout.py
+
 
 # -- the failure must never reach the tick -----------------------------
 

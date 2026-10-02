@@ -163,3 +163,75 @@ def test_walking_can_unblock_you_the_same_day():
 def test_the_shortfall_is_named_in_the_description():
     assert "unwalked" in cap_for(10).describe()
     assert "unwalked" not in cap_for(60).describe()
+
+
+# -- the prompt stays on screen as its text changes (2026-10-02) -------
+
+
+class _GrowingWindow:
+    """Stands in for the prompt's Toplevel: a settable requested size."""
+
+    def __init__(self, width, height=200):
+        self.width, self.height = width, height
+        self.geometries = []
+
+    def update_idletasks(self):
+        pass
+
+    def winfo_reqwidth(self):
+        return self.width
+
+    def winfo_reqheight(self):
+        return self.height
+
+    def geometry(self, spec):
+        self.geometries.append(spec)
+
+
+def _prompt(monkeypatch):
+    from pomodoro_guardian import overlay, pill
+    from pomodoro_guardian.walking import WalkPrompt
+
+    monkeypatch.setattr(overlay, "primary_rect", lambda _root: (0, 0, 1920, 1080))
+    monkeypatch.setattr(pill, "work_area", lambda _root, _rect: (0, 0, 1920, 1032))
+    prompt = WalkPrompt(None, lambda: None, lambda: None)
+    prompt._frame = WalkPrompt.FRAME
+    prompt._placed = None
+    return prompt
+
+
+def _right_edge(prompt, window):
+    x = int(window.geometries[-1].split("+")[1])
+    return x + window.width + prompt._frame[0]
+
+
+def test_a_wider_status_line_keeps_the_right_edge_on_screen(monkeypatch):
+    """Placed while the status line was still empty, the prompt then grew
+    rightwards past the screen edge as soon as the text was filled in."""
+    prompt = _prompt(monkeypatch)
+    window = _GrowingWindow(width=230)
+    prompt._anchor(window)
+    first = _right_edge(prompt, window)
+
+    window.width = 320
+    prompt._anchor(window)
+
+    assert _right_edge(prompt, window) == first == 1920 - prompt.MARGIN
+
+
+def test_an_unchanged_size_does_not_move_the_window(monkeypatch):
+    prompt = _prompt(monkeypatch)
+    window = _GrowingWindow(width=230)
+    prompt._anchor(window)
+    prompt._anchor(window)
+
+    assert len(window.geometries) == 1
+
+
+def test_the_prompt_sits_above_the_taskbar(monkeypatch):
+    prompt = _prompt(monkeypatch)
+    window = _GrowingWindow(width=230, height=200)
+    prompt._anchor(window)
+
+    y = int(window.geometries[-1].split("+")[2])
+    assert y + window.height + prompt._frame[1] == 1032 - prompt.MARGIN

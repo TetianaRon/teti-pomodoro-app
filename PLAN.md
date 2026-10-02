@@ -93,7 +93,7 @@ override and this would be automatic and daily.
 Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
-**State: all 8 phases complete and in daily use.** 473 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 485 tests, pyflakes clean,
 working tree clean. `teti-laptop`'s 9 commits (checkpoints 1–2 of this batch,
 the Pixabay sound-pack fetch, and the Inno Setup installer) are merged into
 `main` and pushed; this branch adds the walk-prompt-vs-break-lock fix
@@ -105,7 +105,7 @@ practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 473 tests
+.venv\Scripts\python.exe -m pytest tests                 # 485 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -155,6 +155,13 @@ Two things run only on the machine, never in the suite:
    its guard logic is tested. To confirm: during a locked break hold a
    Ctrl-combo (e.g. Ctrl+W), let the break end, then scroll a browser — it
    should scroll, not zoom.
+
+**Also unverified (2026-10-02, screen layout fixes):** unplugging the big
+screen during a real break, and during the "break in 2 min" banner — both
+should redraw to fit the laptop within a second — and plugging it back in.
+Unit-tested with stand-in windows only; no real lock was flashed up to test
+it. The walking reminder's corner-pinning *was* watched live, on the
+primary 1080p screen only, not on the laptop panel alone.
 
 **Also unverified (2026-10-02, call detection rework):** the audio-stack
 microphone check holding a break off during a *real* call. Confirmed so far:
@@ -287,6 +294,27 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-10-02 — the walking reminder stays on screen, and the lock and banner follow an unplugged monitor
+
+**Walking reminder ran off the right edge.** `show()` placed it with the
+status line still empty; the app's `update()` filled it in on the same tick
+("… — 50 min still owed" is the widest line), and Tk grows a window from its
+top-left, so the right edge went off screen. It now re-pins its bottom-right
+corner whenever its size changes, inside the monitor's *work area* (it was
+measured against the whole monitor, taskbar included) and counting the title
+bar and borders, which `winfo_reqwidth/height` leave out.
+
+**Break lock missized after unplugging the main screen mid-break.** Lock
+windows were sized per monitor once, at lock time; Windows then herded the
+vanished screen's 1080p window onto the laptop. `LockOverlay._follow_layout`
+now polls the monitor layout each tick and rebuilds the windows when it
+changes, keeping input suppression, an open skip menu and the reminder-only
+notice. `WarningBanner` had the same fault and gets the same treatment,
+checked on every `set_text`.
+
+12 new tests (485 total). **Next:** the hardware checks under "Unverified on
+hardware" above.
 
 ### 2026-10-02 — calls had gone unseen for ten days; the mic check now uses the audio stack, and checks itself
 
