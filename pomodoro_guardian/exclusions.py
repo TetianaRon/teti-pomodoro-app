@@ -5,11 +5,26 @@ an endless list that breaks whenever a new tool appears or an old one
 renames its binary, and a running app says nothing about whether a call is
 actually in progress.
 
-Instead this reads the signal Windows already maintains:
-**CapabilityAccessManager's ConsentStore** — the registry keys behind the
-camera/microphone privacy indicator in the tray. Any app currently holding
-a device has `LastUsedTimeStop = 0`. This is authoritative, cheap to read,
-and works for apps that don't exist yet.
+Instead it asks Windows which apps are holding a device, two ways:
+
+* **The audio stack (primary for the microphone, added 2026-10-02).** Every
+  active capture endpoint is asked for its audio sessions through WASAPI's
+  `IAudioSessionManager2` — the public, documented interface behind the
+  Volume Mixer and Settings' "apps using your microphone". It has been
+  stable since Vista and every audio app depends on it, which is the whole
+  point: it cannot be changed quietly. It has no camera equivalent.
+* **CapabilityAccessManager's ConsentStore (fallback, and the only camera
+  signal)** — the registry keys behind the privacy indicator in the tray.
+  An app holding a device has `LastUsedTimeStop = 0`. This was the only
+  source until 2026-10-02, and it is *not* a public interface: Windows
+  updates KB5124009/KB5124010 (2026-09-22/23) stopped writing it at all on
+  the contributor's laptop, for every capability, and for ten days every
+  call went undetected — breaks were held off by the calendar alone, so
+  any meeting that overran its slot got locked.
+
+Either source seeing the microphone is enough. Because any one of them can
+break again without warning, `detection_health.py` watches the two for
+disagreement and for going silent through calendar meetings.
 
 **A presenting check via `SHQueryUserNotificationState` was tried and
 removed (2026-08-10).** Only `QUNS_PRESENTATION_MODE` was ever narrow
@@ -26,7 +41,9 @@ elsewhere; this module only knows about what the machine is doing now.
 
 from __future__ import annotations
 
+import os
 import sys
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
@@ -66,6 +83,19 @@ class Exclusion:
 def _join(names: list[str]) -> str:
     """Readable app list for an exclusion's detail line."""
     return ", ".join(names)
+
+
+@dataclass(frozen=True)
+class MicReadings:
+    """What each microphone source said on one check.
+
+    Kept per source, not merged, so `detection_health` can notice one of
+    them going quiet while the other still works. `audio` is None when the
+    audio stack could not be asked at all — distinct from "nobody".
+    """
+
+    audio: tuple[str, ...] | None = None
+    registry: tuple[str, ...] = ()
 
 
 class Detector(Protocol):
@@ -145,6 +175,9 @@ class WindowsDetector:
     def __init__(self, camera: bool = True, microphone: bool = True) -> None:
         self._camera = camera
         self._microphone = microphone
+        #: The last check's per-source microphone readings, or None when the
+        #: microphone isn't being watched. Read by the detection health check.
+        self.last_mic: MicReadings | None = None
 
     def check(self) -> Exclusion:
         reasons: list[Reason] = []
@@ -156,7 +189,12 @@ class WindowsDetector:
                 reasons.append(Reason.CAMERA)
                 details.append(_join(users))
         if self._microphone:
-            users = devices_in_use("microphone")
+            audio = capture_sessions_active()
+            registry = devices_in_use("microphone")
+            self.last_mic = MicReadings(
+                None if audio is None else tuple(audio), tuple(registry)
+            )
+            users = sorted(set(audio or []) | set(registry))
             if users:
                 reasons.append(Reason.MICROPHONE)
                 details.append(_join(users))
@@ -164,6 +202,86 @@ class WindowsDetector:
 
 
 # -- Windows plumbing -------------------------------------------------
+
+# WASAPI values (audiosessiontypes.h, mmdeviceapi.h).
+_E_CAPTURE = 1
+_DEVICE_STATE_ACTIVE = 0x1
+_SESSION_ACTIVE = 1
+
+_com_ready = threading.local()
+
+
+def capture_sessions_active() -> list[str] | None:
+    """Apps with an active audio-capture session on any microphone.
+
+    Asks every active capture endpoint — built-in, USB and Bluetooth alike
+    — for its sessions, and keeps those in the active state. A call that
+    is muted but still holds its stream open (Meet does) stays active; one
+    whose app tears the stream down on mute would not.
+
+    Returns process names, deduplicated, never including this app. Returns
+    None when the audio stack can't be asked (pycaw missing, COM failing),
+    so a broken source reads as broken rather than as silence.
+    """
+    try:
+        import comtypes
+        from pycaw.api.audiopolicy import (
+            IAudioSessionControl2,
+            IAudioSessionManager2,
+        )
+        from pycaw.api.mmdeviceapi import IMMDeviceEnumerator
+        from pycaw.constants import CLSID_MMDeviceEnumerator
+    except ImportError:  # pragma: no cover - non-Windows or not installed
+        return None
+
+    try:
+        if not getattr(_com_ready, "done", False):
+            # Once per thread: the tick loop is one thread, but `--exclusions`
+            # and the tests may call this from others.
+            comtypes.CoInitialize()
+            _com_ready.done = True
+        enumerator = comtypes.CoCreateInstance(
+            CLSID_MMDeviceEnumerator,
+            IMMDeviceEnumerator,
+            comtypes.CLSCTX_INPROC_SERVER,
+        )
+        endpoints = enumerator.EnumAudioEndpoints(
+            _E_CAPTURE, _DEVICE_STATE_ACTIVE
+        )
+    except Exception:  # pragma: no cover - COM unavailable
+        return None
+
+    own_pid = os.getpid()
+    pids: set[int] = set()
+    for index in range(endpoints.GetCount()):
+        try:
+            manager = endpoints.Item(index).Activate(
+                IAudioSessionManager2._iid_, comtypes.CLSCTX_ALL, None
+            ).QueryInterface(IAudioSessionManager2)
+            sessions = manager.GetSessionEnumerator()
+            for slot in range(sessions.GetCount()):
+                control = sessions.GetSession(slot).QueryInterface(
+                    IAudioSessionControl2
+                )
+                if control.GetState() != _SESSION_ACTIVE:
+                    continue
+                pid = control.GetProcessId()
+                # Pid 0 is the system's idle placeholder session.
+                if pid and pid != own_pid:
+                    pids.add(pid)
+        except Exception:
+            continue  # one unreadable endpoint mustn't blind the others
+    return sorted({_process_name(pid) for pid in pids})
+
+
+def _process_name(pid: int) -> str:
+    try:
+        import psutil
+
+        return psutil.Process(pid).name()
+    except Exception:
+        return f"pid {pid}"
+
 
 
 def devices_in_use(store: str) -> list[str]:

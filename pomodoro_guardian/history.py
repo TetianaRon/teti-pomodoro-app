@@ -55,6 +55,11 @@ EXCLUDED = "excluded"
 # recorded, so a day's meeting hours had to be inferred from gaps between
 # snapshots — which is exactly the sort of thing this log exists to spare.
 EXCLUSION_ENDED = "exclusion_ended"
+# Call detection checking itself (SPEC §3, detection_health.py): whether a
+# device was seen during each calendar meeting, so a run of silent ones is
+# still counted across restarts, and any warning it raised.
+MEETING_CHECKED = "meeting_checked"
+DETECTION_WARNING = "detection_warning"
 EMERGENCY_USED = "emergency_used"
 FOCUS_STARTED = "focus_started"
 FOCUS_ENDED = "focus_ended"
@@ -252,6 +257,21 @@ class History:
         """Summaries for the last `count` days, newest first."""
         end = today or date.today()
         return [self.summary(end - timedelta(days=n)) for n in range(count)]
+
+    def details_of(self, kind: str, limit: int = 20) -> list[str]:
+        """The `detail` of the latest events of one kind, newest first."""
+        if not self.enabled:
+            return []
+        try:
+            with closing(self._connect()) as db:
+                rows = db.execute(
+                    "SELECT detail FROM events WHERE kind = ?"
+                    " ORDER BY id DESC LIMIT ?",
+                    (kind, limit),
+                ).fetchall()
+        except sqlite3.Error:
+            return []
+        return [row[0] or "" for row in rows]
 
     def tail(self, limit: int = 40, day: date | None = None):
         """Raw events, newest first — the view for chasing a bug."""

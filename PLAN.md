@@ -7,7 +7,7 @@ A Windows desktop app that auto-detects active work and enforces Pomodoro-style 
 ## Phases
 
 1. ✅ Core loop: activity detection → Pomodoro timer → full-screen lock overlay — complete 2026-08-09
-2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call
+2. ✅ Exclusions: video call / screen share detection — complete 2026-08-09, confirmed against a live Google Meet call. **Microphone detection reworked 2026-10-02** after a Windows update silently disabled the original registry source — see Session Worklog.
 3. ✅ Break-skip system (calendar meeting skip + capped custom skip) — complete 2026-08-09
 4. ✅ Daily work cap + Emergency Mode — complete 2026-08-09
 5. ✅ Focus Mode — complete 2026-08-09
@@ -93,7 +93,7 @@ override and this would be automatic and daily.
 Start checkpoint 4 with a fresh `Explore` pass (not yet run this session) —
 none of these three have had their code located yet.
 
-**State: all 8 phases complete and in daily use.** 452 tests, pyflakes clean,
+**State: all 8 phases complete and in daily use.** 473 tests, pyflakes clean,
 working tree clean. `teti-laptop`'s 9 commits (checkpoints 1–2 of this batch,
 the Pixabay sound-pack fetch, and the Inno Setup installer) are merged into
 `main` and pushed; this branch adds the walk-prompt-vs-break-lock fix
@@ -105,7 +105,7 @@ practices.
 ### Run it
 ```
 .venv\Scripts\python.exe -m pomodoro_guardian            # the app
-.venv\Scripts\python.exe -m pytest tests                 # 452 tests
+.venv\Scripts\python.exe -m pytest tests                 # 473 tests
 .venv\Scripts\python.exe -m pyflakes pomodoro_guardian tests
 ```
 Diagnostics, all safe while the app is running: `--doctor`, `--history [DAYS]`,
@@ -155,6 +155,16 @@ Two things run only on the machine, never in the suite:
    its guard logic is tested. To confirm: during a locked break hold a
    Ctrl-combo (e.g. Ctrl+W), let the break end, then scroll a browser — it
    should scroll, not zoom.
+
+**Also unverified (2026-10-02, call detection rework):** the audio-stack
+microphone check holding a break off during a *real* call. Confirmed so far:
+it saw `chrome.exe` capturing during a live Meet call while the registry
+said "nobody", and it runs in ~3 ms per tick. Not yet watched: a full
+overrunning meeting staying unlocked, and whether **Teams, Zoom or Slack
+keep the capture stream open when muted** (Meet does). To check, run
+`--exclusions` while muted on each — `mic (audio)` should name the app. The
+health warnings are unit-tested only; the "registry has gone quiet" log
+line should appear in `pomodoro.log` during the first call over 2 minutes.
 
 **Also unverified (2026-08-22):** the meeting/skip redesign — a break
 bleeding into a real meeting reads as free-to-skip, and a break already due
@@ -277,6 +287,36 @@ log), `pomodoro.log` (text log, written when there is no console).
 - ~~Long-break-every-4th-cycle reset rule~~ — **resolved 2026-08-09: resets after an idle gap** (`Config.idle_reset_after`, default 60 min), not at a fixed daily time. Chosen to match the app's auto-detect premise: a genuine spell away from the desk starts a fresh set, whereas a midnight reset would carry a count across a long lunch and reset one mid-evening.
 
 ## Session Worklog
+
+### 2026-10-02 — calls had gone unseen for ten days; the mic check now uses the audio stack, and checks itself
+
+**Reported:** the lock fired mid-meeting, at least the third time. The log
+showed the 12:00 meeting held off by the calendar alone until its 12:30 end,
+then a lock at 12:35 (`post_meeting_break_delay`) with the call still running.
+
+**Cause:** Windows updates KB5124009/KB5124010 (installed 2026-09-22/23)
+stopped writing CapabilityAccessManager's ConsentStore — for every
+capability, not just the mic. The history log has no camera/mic exclusion
+after 2026-09-22. The registry was the app's only device signal, so every
+call since was seen only if it was on the calendar, and only for its
+scheduled slot.
+
+**Fix (SPEC §3, "How a call is seen"):** the microphone is now read
+primarily from WASAPI capture sessions (`exclusions.capture_sessions_active`,
+via the existing pycaw dependency), with the registry kept as fallback and
+camera source. A new `detection_health.py` warns when the two sources
+disagree, when the audio stack is unavailable, or when 4 calendar meetings
+in a row pass with no device seen (streak kept in history as
+`meeting_checked` events). `--exclusions` shows each source separately.
+21 new tests (473 total).
+
+**Decided:** layered sources plus self-checks rather than chasing an
+update-proof single source, since none exists. Process-name detection
+stays rejected (§3). Disagreement where only the registry is quiet is
+log-only, as the audio stack still covers calls.
+
+**Next:** watch it on real calls — see "Unverified on hardware" above —
+especially muted Teams/Zoom/Slack.
 
 ### 2026-08-22 — the skip-menu hold now shows it's working before the 3 seconds are up
 

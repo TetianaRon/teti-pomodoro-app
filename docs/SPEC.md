@@ -131,7 +131,7 @@ Two things follow from a break that can be walked away from, both handled:
 ## 3. Never-interrupt exclusions
 
 The lock will not trigger — and an in-progress countdown pauses — while:
-- A video call is active (auto-detected: any app holding the camera or microphone).
+- A video call is active (auto-detected: any app holding the camera or microphone — see "How a call is seen" below).
 - A calendar meeting is currently in progress (see §4 — this is the "meeting skip").
 
 These are automatic; you don't have to invoke anything for them.
@@ -281,6 +281,49 @@ Two things worth being explicit about, because they are easy to misread:
 
 `--exclusions` reports what is currently holding breaks off; `--no-exclusions`
 disables the mechanism entirely.
+
+**How a call is seen, and how the app notices when it stops seeing them
+(redesigned 2026-10-02).** No source of this signal is update-proof — every
+one belongs to Windows — so the design is layered sources plus a check that
+makes a broken one loud the same day:
+
+1. **Microphone via the audio stack (primary).** WASAPI's
+   `IAudioSessionManager2`, asked across every active capture endpoint for
+   sessions in the active state. A public, documented interface — the one
+   the Volume Mixer runs on — so it can't be changed quietly.
+2. **Camera and microphone via CapabilityAccessManager's ConsentStore
+   (fallback).** The registry records behind the tray's privacy indicator.
+   Until 2026-10-02 this was the *only* source, and it is not a public
+   interface: Windows updates KB5124009/KB5124010 (2026-09-22/23) stopped
+   it being written at all, and for ten days every call went unseen.
+   Breaks were held off by the calendar alone, so any meeting that ran past
+   its slot was locked once `post_meeting_break_delay` passed. Kept because
+   it costs nothing and is still the only camera signal.
+3. **The calendar (§4A)** — independent of Windows entirely.
+
+Either microphone source seeing a stream holds the break off. Then
+`detection_health.py` checks the sources against each other and against the
+calendar:
+
+- **Sources disagree for 2+ minutes.** Audio hears a stream the registry
+  doesn't: logged once, no banner — the primary is still covering calls.
+  Registry sees one the audio stack doesn't: banner, since either the
+  primary has broken or an app left a stale entry behind.
+- **Audio stack can't be asked** (pycaw missing, COM failing): banner, once.
+- **Four calendar meetings in a row with no camera or microphone seen**:
+  banner, repeated on each further silent meeting. This catches both device
+  sources failing together, which the disagreement check cannot. Four, not
+  one, because in-person meetings and phone calls are normal; the streak is
+  kept in the history log so restarts don't reset it.
+
+Banner warnings show for 5 minutes and never displace a break countdown.
+Every warning is logged and recorded as a `detection_warning` history event.
+`--exclusions` prints each source on its own line.
+
+**Accepted gap:** an app that tears its capture stream down on mute would
+look like no call to the audio stack. Meet keeps the stream open when muted;
+Teams, Zoom and Slack are unmeasured. The calendar still covers a scheduled
+call either way.
 
 ## 4. Break-skip system
 

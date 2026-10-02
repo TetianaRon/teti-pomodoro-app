@@ -24,6 +24,7 @@ from . import state as state_module
 from .activity import ActivityMonitor, create_monitor
 from .calendar_watch import CalendarWatcher
 from .config import DEFAULT, Config
+from .detection_health import DetectionHealth, SILENT_MEETINGS_WARN, streak_from
 from .exclusions import (
     CombinedDetector,
     Detector,
@@ -104,6 +105,9 @@ class Application:
         # config wrote its state where it was told and its history into the
         # real log — which is how a test run put a zeroed snapshot and a
         # false app_stopped into a live day (2026-08-10).
+        # Kept separately from the combined detector so the health check can
+        # read each microphone source on its own (SPEC §3).
+        self._device_detector = device_detector
         self._settings_file = settings_file or settings_module.default_path()
         self._state_file = state_file
         self._state = state_module.load(state_file)
@@ -122,6 +126,11 @@ class Application:
         self._announced_over = False
         self.history = history_module.History(
             history_module.history_path(self._settings_file)
+        )
+        self.detection_health = DetectionHealth(
+            silent_streak=streak_from(self.history.details_of(
+                history_module.MEETING_CHECKED, SILENT_MEETINGS_WARN + 1
+            ))
         )
         self._last_snapshot = 0.0
         self._logged_day_type = ""
@@ -915,6 +924,15 @@ class Application:
             # A standing marker, so being over the cap is visible without
             # having to wait for the next break to say so.
             notice = f"Overtime — {self._cap.describe()}"
+        self._check_detection_health(now, exclusion)
+        health = self.detection_health.banner(now)
+        if (
+            notice is None and health is not None
+            and snapshot.state is not State.WARNING
+        ):
+            # Below the break countdown: a warning about detection must not
+            # hide the one thing on the banner with a deadline.
+            notice = health
 
         for event in events:
             self._handle(event, snapshot)
@@ -1076,6 +1094,25 @@ class Application:
             )
         return f"No breaks for {held / 3600:.0f}h — {self._exclusion.describe()}"
 
+    def _check_detection_health(self, now: float, exclusion) -> None:
+        """Feed this tick to the detection health check (SPEC §3)."""
+        device_seen = any(
+            r in exclusion.reasons for r in (Reason.CAMERA, Reason.MICROPHONE)
+        )
+        warnings, verdict = self.detection_health.observe(
+            now,
+            getattr(self._device_detector, "last_mic", None),
+            meeting=Reason.MEETING in exclusion.reasons,
+            device_seen=device_seen,
+        )
+        if verdict is not None:
+            self.history.record(history_module.MEETING_CHECKED, detail=verdict)
+        for warning in warnings:
+            self._log(f"warning: {warning.message}")
+            self.history.record(
+                history_module.DETECTION_WARNING, detail=warning.message
+            )
+
     def _log(self, message: str) -> None:
         print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
@@ -1220,15 +1257,22 @@ def report_exclusions(
     config: Config, settings, settings_file: Path | None = None
 ) -> int:
     """`--exclusions`: say what is holding breaks off right now, and why."""
-    from .exclusions import devices_in_use
+    from .exclusions import capture_sessions_active, devices_in_use
 
     detector = create_detector(
         camera=config.exclude_on_camera,
         microphone=config.exclude_on_microphone,
     )
     print("Never-interrupt exclusions (SPEC §3, §4A)\n")
-    print(f"  camera in use by  : {_or_none(devices_in_use('webcam'))}")
-    print(f"  microphone in use : {_or_none(devices_in_use('microphone'))}")
+    # Each source on its own line: they are separate Windows mechanisms, and
+    # one going quiet while the other works is exactly what to look for.
+    audio = capture_sessions_active()
+    print(f"  camera (registry) : {_or_none(devices_in_use('webcam'))}")
+    print(
+        "  mic (audio)       : "
+        + ("UNAVAILABLE" if audio is None else _or_none(audio))
+    )
+    print(f"  mic (registry)    : {_or_none(devices_in_use('microphone'))}")
 
     watcher = CalendarWatcher(
         settings.calendar_url,

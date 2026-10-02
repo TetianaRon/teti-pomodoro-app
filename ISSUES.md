@@ -11,6 +11,30 @@ Newest first.
 
 ## Open
 
+### 2026-10-02 — Call detection died silently for ten days, and nothing checked whether it worked
+**Symptom.** The lock fired during meetings (three times reported), each one
+running past its calendar slot.
+
+**Cause.** Windows updates KB5124009/KB5124010 (2026-09-22/23) stopped
+Windows writing the ConsentStore registry records — the app's only camera/
+mic signal. Every check after that said "nobody", which looks exactly like
+"no call", so the app carried on normally on the calendar alone.
+
+**Workflow gap.** Nothing verified that detection was still *working*, only
+what it reported. The history log held the evidence the whole time (no
+device exclusion after 2026-09-22 while calendar ones carried on), but
+nothing read it. The source was also an undocumented Windows internal,
+chosen in Phase 2 without that risk written down.
+
+**Fixed 2026-10-02:** a public-API primary source (WASAPI) plus
+`detection_health.py`, which flags silent or disagreeing sources the same
+day — see PLAN.md's worklog. **Left open** until a real overrunning call on
+the laptop stays unlocked and muted Teams/Zoom/Slack have been checked.
+
+**Lesson for future sources:** any signal read from an OS internal needs a
+second source or a self-check, because when it fails it says "nothing"
+rather than raising an error.
+
 ### 2026-08-20 — A Python point-upgrade silently killed the venv and every shortcut
 The app would not start, and the only symptom was a `Python Launcher is
 sorry to say ...` dialog reporting no Python at

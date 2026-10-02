@@ -7,6 +7,8 @@ the parts that don't need a live camera can be exercised.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from pomodoro_guardian.config import Config
@@ -239,13 +241,20 @@ def test_multiple_reasons_are_all_reported():
     assert "camera" in described and "microphone" in described
 
 
-def _patch_devices(monkeypatch, *, webcam=(), microphone=()):
+def _patch_devices(monkeypatch, *, webcam=(), microphone=(), audio=()):
+    """Script both sources: `microphone` is the registry, `audio` the audio
+    stack (None for "couldn't be asked")."""
     from pomodoro_guardian import exclusions
 
     monkeypatch.setattr(
         exclusions,
         "devices_in_use",
         lambda store: list(webcam if store == "webcam" else microphone),
+    )
+    monkeypatch.setattr(
+        exclusions,
+        "capture_sessions_active",
+        lambda: None if audio is None else list(audio),
     )
     return exclusions
 
@@ -324,3 +333,56 @@ def test_disabled_signals_are_not_consulted(monkeypatch):
 )
 def test_registry_key_names_are_made_readable(key_name, expected):
     assert friendly_name(key_name) == expected
+
+
+# -- the audio-stack source (added 2026-10-02) -------------------------
+
+
+def test_the_audio_stack_alone_holds_a_break_off(monkeypatch):
+    """The case that broke: Windows stopped writing the registry records
+    (KB5124009/KB5124010) while Meet was plainly holding the microphone."""
+    exclusions = _patch_devices(monkeypatch, audio=["chrome.exe"])
+    result = exclusions.WindowsDetector().check()
+
+    assert result.reasons == (Reason.MICROPHONE,)
+    assert "chrome.exe" in result.describe()
+
+
+def test_the_registry_still_counts_when_the_audio_stack_is_unavailable(
+    monkeypatch,
+):
+    exclusions = _patch_devices(
+        monkeypatch, microphone=["Zoom.exe"], audio=None
+    )
+    assert exclusions.WindowsDetector().check().reasons == (Reason.MICROPHONE,)
+
+
+def test_an_app_seen_by_both_sources_is_named_once(monkeypatch):
+    exclusions = _patch_devices(
+        monkeypatch, microphone=["chrome.exe"], audio=["chrome.exe"]
+    )
+    assert exclusions.WindowsDetector().check().detail == "chrome.exe"
+
+
+def test_each_source_reading_is_kept_for_the_health_check(monkeypatch):
+    exclusions = _patch_devices(monkeypatch, audio=["chrome.exe"])
+    detector = exclusions.WindowsDetector()
+    detector.check()
+
+    assert detector.last_mic == exclusions.MicReadings(("chrome.exe",), ())
+
+
+def test_an_unwatched_microphone_reports_no_readings(monkeypatch):
+    exclusions = _patch_devices(monkeypatch, audio=["chrome.exe"])
+    detector = exclusions.WindowsDetector(microphone=False)
+    detector.check()
+
+    assert detector.last_mic is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs WASAPI")
+def test_the_real_audio_stack_can_be_asked():
+    """Not whether anything is recording, only that the query works."""
+    from pomodoro_guardian.exclusions import capture_sessions_active
+
+    assert capture_sessions_active() is not None
